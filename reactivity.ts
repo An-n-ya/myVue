@@ -1,10 +1,15 @@
 interface EffectFunction {
     (): any
     deps: DepsSet[]
+    options: EffectOptions
 }
 type Fn = () => any
 type DepsSet = Set<EffectFunction>
 type DepsMap = Map<string | symbol, DepsSet>
+type SchedulerFunction = (EffectFunction) => any
+type EffectOptions = {
+    scheduler?: SchedulerFunction
+}
 
 // 用来存储副作用函数的容器
 // 使用weakMap作用容器
@@ -58,7 +63,15 @@ function trigger(target: object, key: string | symbol) {
             effectsToRun.add(effectFn)
         }
     })
-    effectsToRun && effectsToRun.forEach(effectFn => effectFn())
+    effectsToRun && effectsToRun.forEach(effectFn => {
+        if (effectFn.options.scheduler) {
+            // 如果有调度函数
+            // 把effectFn控制权交给定义调度函数的用户
+            effectFn.options.scheduler(effectFn)
+        }else {
+            effectFn()
+        }
+    })
 }
 
 
@@ -84,7 +97,7 @@ function cleanup(effectFn: EffectFunction) {
     effectFn.deps.length = 0
 }
 
-function effect(fn: Fn) {
+function effect(fn: Fn, options: EffectOptions = {}) {
     const effectFn = () => {
         // 当effectFn执行时， 将其设置为activeEffect
         cleanup(effectFn)
@@ -97,6 +110,8 @@ function effect(fn: Fn) {
         // 还原activeEffect
         activeEffect = effectStack[effectStack.length - 1]
     }
+    // 将options添加到effectFn上
+    effectFn.options = options
 
     // activeEffect.deps 用来存放与该副作用函数相关联的依赖
     // 依赖在track函数中收集
@@ -108,7 +123,32 @@ function test() {
     // test_basic()
     // test_branch()
     // test_recursion()
-    test_stackoverflow()
+    // test_stackoverflow()
+    test_scheduler()
+}
+
+// 测试调度执行
+function test_scheduler() {
+    // console.log("=====before=====")
+    // effect(() => {
+    //     console.log(obj.val)
+    // })
+    // obj.val++
+    // console.log("over")
+    // console.log("===============")
+    console.log("=====after=====")
+    effect(() => {
+        console.log(obj.val)
+    }, {
+        scheduler(fn){
+            // 将fn放到宏任务执行
+            setTimeout(fn)
+        }
+        })
+    obj.val++
+    console.log("over")
+    console.log("===============")
+
 }
 
 // 避免无线递归，栈溢出

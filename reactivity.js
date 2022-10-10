@@ -46,7 +46,16 @@ function trigger(target, key) {
             effectsToRun.add(effectFn);
         }
     });
-    effectsToRun && effectsToRun.forEach(function (effectFn) { return effectFn(); });
+    effectsToRun && effectsToRun.forEach(function (effectFn) {
+        if (effectFn.options.scheduler) {
+            // 如果有调度函数
+            // 把effectFn控制权交给定义调度函数的用户
+            effectFn.options.scheduler(effectFn);
+        }
+        else {
+            effectFn();
+        }
+    });
 }
 var obj = new Proxy(data, {
     get: function (target, p, receiver) {
@@ -68,7 +77,8 @@ function cleanup(effectFn) {
     }
     effectFn.deps.length = 0;
 }
-function effect(fn) {
+function effect(fn, options) {
+    if (options === void 0) { options = {}; }
     var effectFn = function () {
         // 当effectFn执行时， 将其设置为activeEffect
         cleanup(effectFn);
@@ -81,6 +91,8 @@ function effect(fn) {
         // 还原activeEffect
         activeEffect = effectStack[effectStack.length - 1];
     };
+    // 将options添加到effectFn上
+    effectFn.options = options;
     // activeEffect.deps 用来存放与该副作用函数相关联的依赖
     // 依赖在track函数中收集
     effectFn.deps = [];
@@ -90,7 +102,30 @@ function test() {
     // test_basic()
     // test_branch()
     // test_recursion()
-    test_stackoverflow();
+    // test_stackoverflow()
+    test_scheduler();
+}
+// 测试调度执行
+function test_scheduler() {
+    // console.log("=====before=====")
+    // effect(() => {
+    //     console.log(obj.val)
+    // })
+    // obj.val++
+    // console.log("over")
+    // console.log("===============")
+    console.log("=====after=====");
+    effect(function () {
+        console.log(obj.val);
+    }, {
+        scheduler: function (fn) {
+            // 将fn放到宏任务执行
+            setTimeout(fn);
+        }
+    });
+    obj.val++;
+    console.log("over");
+    console.log("===============");
 }
 // 避免无线递归，栈溢出
 function test_stackoverflow() {
