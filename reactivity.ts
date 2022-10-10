@@ -7,6 +7,7 @@ type Fn = () => any
 type DepsSet = Set<EffectFunction>
 type DepsMap = Map<string | symbol, DepsSet>
 type SchedulerFunction = (EffectFunction) => any
+type WatchCallBackFunction = (newValue?: any, oldValue?: any) => any
 type EffectOptions = {
     scheduler?: SchedulerFunction
     lazy?: boolean
@@ -98,6 +99,48 @@ function cleanup(effectFn: EffectFunction) {
     effectFn.deps.length = 0
 }
 
+// 实现watch
+function watch(source: any, cb: WatchCallBackFunction) {
+    // 用来支持为函数的source
+    let getter
+    if (typeof source == 'function') {
+        getter = source
+    } else {
+        getter = () => traverse(source)
+    }
+    // 定义旧值和新值
+    let oldValue, newValue
+    const effectFn = effect(
+        // 调用traverse函数递归读取source
+        () => getter(),
+        {
+            lazy: true,
+            scheduler() {
+                // 在 scheduler 中重新执行副作用函数，得到的是新值
+                newValue = effectFn()
+                // 调用回调函数
+                cb(newValue, oldValue)
+                // 更新旧值
+                oldValue = newValue
+            }
+        }
+    )
+    // 手动调用副作用函数，拿到旧值
+    oldValue = effectFn()
+}
+
+function traverse(value, seen = new Set()) {
+    // *终止条件* 如果要读取的数据不是对象，或者已经被读取了
+    if (typeof value != 'object' || value === null || seen.has(value)) return
+    // 将数据加入seen
+    seen.add(value)
+    for (const k in value) {
+        traverse(value[k], seen)
+    }
+
+    return value
+}
+
 // 实现computed  计算属性
 function computed(getter: Fn) {
     // value 用来缓存上一次计算的值
@@ -164,8 +207,37 @@ function test() {
     // test_scheduler()
     // test_lazy()
     // test_computed()
-    test_computed_with_recursion()
+    // test_computed_with_recursion()
+    test_watch()
 }
+
+// 测试watch
+function test_watch() {
+    watch(obj, () => {
+        console.log("obj变啦！")
+    })
+
+    obj.val++
+
+    // watch也可以处理函数
+    watch(
+        () => obj.foo,
+        () => console.log("obj.foo变啦！")
+    )
+    // 下面这个会同时触发两个watch
+    obj.foo++
+    // 这个只会触发一个
+    obj.val++
+
+    watch(
+        () => obj.val,
+        (nv, ov) => {
+            console.log(`新值是${nv}, 旧值是${ov}`)
+        }
+    )
+    obj.val++
+}
+
 
 // 测试涉及嵌套的计算函数
 function test_computed_with_recursion() {

@@ -77,6 +77,46 @@ function cleanup(effectFn) {
     }
     effectFn.deps.length = 0;
 }
+// 实现watch
+function watch(source, cb) {
+    // 用来支持为函数的source
+    var getter;
+    if (typeof source == 'function') {
+        getter = source;
+    }
+    else {
+        getter = function () { return traverse(source); };
+    }
+    // 定义旧值和新值
+    var oldValue, newValue;
+    var effectFn = effect(
+    // 调用traverse函数递归读取source
+    function () { return getter(); }, {
+        lazy: true,
+        scheduler: function () {
+            // 在 scheduler 中重新执行副作用函数，得到的是新值
+            newValue = effectFn();
+            // 调用回调函数
+            cb(newValue, oldValue);
+            // 更新旧值
+            oldValue = newValue;
+        }
+    });
+    // 手动调用副作用函数，拿到旧值
+    oldValue = effectFn();
+}
+function traverse(value, seen) {
+    if (seen === void 0) { seen = new Set(); }
+    // *终止条件* 如果要读取的数据不是对象，或者已经被读取了
+    if (typeof value != 'object' || value === null || seen.has(value))
+        return;
+    // 将数据加入seen
+    seen.add(value);
+    for (var k in value) {
+        traverse(value[k], seen);
+    }
+    return value;
+}
 // 实现computed  计算属性
 function computed(getter) {
     // value 用来缓存上一次计算的值
@@ -140,7 +180,25 @@ function test() {
     // test_scheduler()
     // test_lazy()
     // test_computed()
-    test_computed_with_recursion();
+    // test_computed_with_recursion()
+    test_watch();
+}
+// 测试watch
+function test_watch() {
+    watch(obj, function () {
+        console.log("obj变啦！");
+    });
+    obj.val++;
+    // watch也可以处理函数
+    watch(function () { return obj.foo; }, function () { return console.log("obj.foo变啦！"); });
+    // 下面这个会同时触发两个watch
+    obj.foo++;
+    // 这个只会触发一个
+    obj.val++;
+    watch(function () { return obj.val; }, function (nv, ov) {
+        console.log("\u65B0\u503C\u662F" + nv + ", \u65E7\u503C\u662F" + ov);
+    });
+    obj.val++;
 }
 // 测试涉及嵌套的计算函数
 function test_computed_with_recursion() {
