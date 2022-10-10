@@ -7,7 +7,7 @@ var activeEffect;
 // 使用一个栈存放effect函数
 var effectStack = [];
 // 响应式数据
-var data = { ok: true, text: "hello world!", val: 1 };
+var data = { ok: true, text: "hello world!", val: 1, foo: 2 };
 function track(target, key) {
     if (!activeEffect) {
         // 如果没有activeEffect，直接返回
@@ -73,9 +73,37 @@ function cleanup(effectFn) {
     for (var i = 0; i < effectFn.deps.length; i++) {
         // 将effectFn从它的依赖集合中删除
         var deps = effectFn.deps[i];
-        deps["delete"](effectFn);
+        deps.delete(effectFn);
     }
     effectFn.deps.length = 0;
+}
+// 实现computed  计算属性
+function computed(getter) {
+    // value 用来缓存上一次计算的值
+    var value;
+    // 用来标识是否需要重新计算
+    var dirty = true;
+    // 把 getter 作为副作用函数，创建一个lazy的effect
+    var effectFn = effect(getter, { lazy: true, scheduler: function () {
+            // 在改变的时候重置dirty
+            dirty = true;
+            // 当计算属性依赖的响应式数据变化时，手动调用trigger
+            trigger(obj, 'value');
+        } });
+    var obj = {
+        get value() {
+            // 只有在dirty状态下需要重新计算
+            if (dirty) {
+                // 在读取value时，调用effectFn
+                value = effectFn();
+                dirty = false;
+            }
+            // 当读取value时，手动调用track函数跟踪依赖
+            track(obj, 'value');
+            return value;
+        }
+    };
+    return obj;
 }
 function effect(fn, options) {
     if (options === void 0) { options = {}; }
@@ -85,25 +113,70 @@ function effect(fn, options) {
         activeEffect = effectFn;
         // 在调用副作用函数之前，把activeEffect入栈
         effectStack.push(activeEffect);
-        fn();
+        // 把结果保存下来返回
+        var res = fn();
         // 副作用函数执行完后，弹出
         effectStack.pop();
         // 还原activeEffect
         activeEffect = effectStack[effectStack.length - 1];
+        return res;
     };
     // 将options添加到effectFn上
     effectFn.options = options;
     // activeEffect.deps 用来存放与该副作用函数相关联的依赖
     // 依赖在track函数中收集
     effectFn.deps = [];
-    effectFn();
+    // 只有在非lazy是运行
+    if (!options.lazy) {
+        effectFn();
+    }
+    return effectFn;
 }
 function test() {
     // test_basic()
     // test_branch()
     // test_recursion()
     // test_stackoverflow()
-    test_scheduler();
+    // test_scheduler()
+    // test_lazy()
+    // test_computed()
+    test_computed_with_recursion();
+}
+// 测试涉及嵌套的计算函数
+function test_computed_with_recursion() {
+    var res = computed(function () {
+        console.log("缓存结果，只有在值改变的时候你能看到我");
+        return obj.val + obj.foo;
+    });
+    effect(function () {
+        console.log(res.value);
+    });
+    // 应该会触发上面的effect，输出4
+    obj.val++;
+}
+// 测试计算函数
+function test_computed() {
+    var res = computed(function () {
+        console.log("缓存结果，只有在值改变的时候你能看到我");
+        return obj.val + obj.foo;
+    });
+    console.log(res.value);
+    console.log(res.value);
+    console.log(res.value);
+    obj.val++;
+    console.log(res.value);
+}
+// 测试lazy
+function test_lazy() {
+    var effectFn = effect(function () {
+        console.log(obj.val);
+    }, {
+        lazy: true
+    });
+    // 这是已经不能执行副作用函数了
+    obj.val++;
+    // 需要手动调用
+    effectFn();
 }
 // 测试调度执行
 function test_scheduler() {

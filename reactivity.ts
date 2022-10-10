@@ -9,6 +9,7 @@ type DepsMap = Map<string | symbol, DepsSet>
 type SchedulerFunction = (EffectFunction) => any
 type EffectOptions = {
     scheduler?: SchedulerFunction
+    lazy?: boolean
 }
 
 // 用来存储副作用函数的容器
@@ -21,7 +22,7 @@ let activeEffect: EffectFunction
 const effectStack: EffectFunction[] = []
 
 // 响应式数据
-const data = { ok: true, text: "hello world!", val: 1 }
+const data = { ok: true, text: "hello world!", val: 1, foo: 2 }
 
 function track(target: object, key: string | symbol) {
     if (!activeEffect) {
@@ -97,6 +98,36 @@ function cleanup(effectFn: EffectFunction) {
     effectFn.deps.length = 0
 }
 
+// 实现computed  计算属性
+function computed(getter: Fn) {
+    // value 用来缓存上一次计算的值
+    let value
+    // 用来标识是否需要重新计算
+    let dirty = true
+    // 把 getter 作为副作用函数，创建一个lazy的effect
+    const effectFn = effect(getter, {lazy: true, scheduler() {
+            // 在改变的时候重置dirty
+            dirty = true
+            // 当计算属性依赖的响应式数据变化时，手动调用trigger
+            trigger(obj, 'value')
+        }})
+    const obj = {
+        get value() {
+            // 只有在dirty状态下需要重新计算
+            if (dirty) {
+                // 在读取value时，调用effectFn
+                value = effectFn()
+                dirty = false
+            }
+            // 当读取value时，手动调用track函数跟踪依赖
+            track(obj, 'value')
+            return value
+        }
+    }
+    return obj
+}
+
+
 function effect(fn: Fn, options: EffectOptions = {}) {
     const effectFn = () => {
         // 当effectFn执行时， 将其设置为activeEffect
@@ -104,11 +135,13 @@ function effect(fn: Fn, options: EffectOptions = {}) {
         activeEffect = effectFn
         // 在调用副作用函数之前，把activeEffect入栈
         effectStack.push(activeEffect)
-        fn()
+        // 把结果保存下来返回
+        const res = fn()
         // 副作用函数执行完后，弹出
         effectStack.pop()
         // 还原activeEffect
         activeEffect = effectStack[effectStack.length - 1]
+        return res
     }
     // 将options添加到effectFn上
     effectFn.options = options
@@ -116,7 +149,11 @@ function effect(fn: Fn, options: EffectOptions = {}) {
     // activeEffect.deps 用来存放与该副作用函数相关联的依赖
     // 依赖在track函数中收集
     effectFn.deps = []
-    effectFn()
+    // 只有在非lazy是运行
+    if (!options.lazy) {
+        effectFn()
+    }
+    return effectFn
 }
 
 function test() {
@@ -124,8 +161,50 @@ function test() {
     // test_branch()
     // test_recursion()
     // test_stackoverflow()
-    test_scheduler()
+    // test_scheduler()
+    // test_lazy()
+    // test_computed()
+    test_computed_with_recursion()
 }
+
+// 测试涉及嵌套的计算函数
+function test_computed_with_recursion() {
+    const res = computed(() => {
+        console.log("缓存结果，只有在值改变的时候你能看到我")
+        return obj.val + obj.foo
+    })
+    effect(() => {
+        console.log(res.value)
+    })
+    // 应该会触发上面的effect，输出4
+    obj.val++
+}
+
+// 测试计算函数
+function test_computed() {
+    const res = computed(() => {
+        console.log("缓存结果，只有在值改变的时候你能看到我")
+        return obj.val + obj.foo
+    })
+    console.log(res.value)
+    console.log(res.value)
+    console.log(res.value)
+    obj.val++
+    console.log(res.value)
+}
+
+// 测试lazy
+function test_lazy() {
+    const effectFn = effect(() => {
+        console.log(obj.val)},{
+        lazy: true
+    })
+    // 这是已经不能执行副作用函数了
+    obj.val++
+    // 需要手动调用
+    effectFn()
+}
+
 
 // 测试调度执行
 function test_scheduler() {
