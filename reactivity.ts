@@ -12,6 +12,8 @@ type DepsMap = Map<string | symbol, DepsSet>
 const bucket = new WeakMap<object, DepsMap>()
 // 用全局变量存储注册的effect函数
 let activeEffect: EffectFunction
+// 使用一个栈存放effect函数
+const effectStack: EffectFunction[] = []
 
 // 响应式数据
 const data = { ok: true, text: "hello world!" }
@@ -81,7 +83,13 @@ function effect(fn: Fn) {
         // 当effectFn执行时， 将其设置为activeEffect
         cleanup(effectFn)
         activeEffect = effectFn
+        // 在调用副作用函数之前，把activeEffect入栈
+        effectStack.push(activeEffect)
         fn()
+        // 副作用函数执行完后，弹出
+        effectStack.pop()
+        // 还原activeEffect
+        activeEffect = effectStack[effectStack.length - 1]
     }
 
     // activeEffect.deps 用来存放与该副作用函数相关联的依赖
@@ -90,19 +98,64 @@ function effect(fn: Fn) {
     effectFn()
 }
 
-effect(
-    () => {
-        console.log("你应该只看到我两次！")
-        let node = document.querySelector("#app")
-        node.textContent = obj.ok ? obj.text : 'not'
-    }
-)
+function test() {
+    // test_basic()
+    // test_branch()
+    test_recursion()
+}
+
+// 嵌套测试
+function test_recursion() {
+    let tmp1, tmp2
+    effect(
+        () => {
+            console.log("外层执行")
+
+            effect(() => {
+                console.log("内层执行")
+                tmp2 = obj.ok
+            })
+
+            tmp1 = obj.text
+        }
+    )
+    // 理想情况应该是：
+    // 外层执行
+    // 内层执行
+    // 外层执行
+    // 内层执行
+    obj.text = "haha"
+}
+
+// 分支测试
+function test_branch() {
+    effect(
+        () => {
+            console.log("你应该只看到我两次！")
+            let node = document.querySelector("#app")
+            node.textContent = obj.ok ? obj.text : 'not'
+        }
+    )
 
 // 切换成false之后， text上的副作用函数应该取消监听
-obj.ok = false
+    obj.ok = false
 
-obj.text = "hello"
+// 改变这个将不会触发副作用函数
+    obj.text = "hello"
+}
 
-// setTimeout(() => {
-//     obj.text = "hello again!"
-// }, 1000)
+// 基础测试
+function test_basic() {
+    effect(
+        () => {
+            let node = document.querySelector("#app")
+            node.textContent = "hello world!"
+        }
+    )
+
+    setTimeout(() => {
+        obj.text = "hello again!"
+    }, 1000)
+}
+
+test()

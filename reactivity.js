@@ -4,6 +4,8 @@
 var bucket = new WeakMap();
 // 用全局变量存储注册的effect函数
 var activeEffect;
+// 使用一个栈存放effect函数
+var effectStack = [];
 // 响应式数据
 var data = { ok: true, text: "hello world!" };
 function track(target, key) {
@@ -65,21 +67,62 @@ function effect(fn) {
         // 当effectFn执行时， 将其设置为activeEffect
         cleanup(effectFn);
         activeEffect = effectFn;
+        // 在调用副作用函数之前，把activeEffect入栈
+        effectStack.push(activeEffect);
         fn();
+        // 副作用函数执行完后，弹出
+        effectStack.pop();
+        // 还原activeEffect
+        activeEffect = effectStack[effectStack.length - 1];
     };
     // activeEffect.deps 用来存放与该副作用函数相关联的依赖
     // 依赖在track函数中收集
     effectFn.deps = [];
     effectFn();
 }
-effect(function () {
-    console.log("hello");
-    var node = document.querySelector("#app");
-    node.textContent = obj.ok ? obj.text : 'not';
-});
-// 切换成false之后， text上的副作用函数应该取消监听
-obj.ok = false;
-obj.text = "hello";
-// setTimeout(() => {
-//     obj.text = "hello again!"
-// }, 1000)
+function test() {
+    // test_basic()
+    // test_branch()
+    test_recursion();
+}
+// 嵌套测试
+function test_recursion() {
+    var tmp1, tmp2;
+    effect(function () {
+        console.log("外层执行");
+        effect(function () {
+            console.log("内层执行");
+            tmp2 = obj.ok;
+        });
+        tmp1 = obj.text;
+    });
+    // 理想情况应该是：
+    // 外层执行
+    // 内层执行
+    // 外层执行
+    // 内层执行
+    obj.text = "haha";
+}
+// 分支测试
+function test_branch() {
+    effect(function () {
+        console.log("你应该只看到我两次！");
+        var node = document.querySelector("#app");
+        node.textContent = obj.ok ? obj.text : 'not';
+    });
+    // 切换成false之后， text上的副作用函数应该取消监听
+    obj.ok = false;
+    // 改变这个将不会触发副作用函数
+    obj.text = "hello";
+}
+// 基础测试
+function test_basic() {
+    effect(function () {
+        var node = document.querySelector("#app");
+        node.textContent = "hello world!";
+    });
+    setTimeout(function () {
+        obj.text = "hello again!";
+    }, 1000);
+}
+test();
