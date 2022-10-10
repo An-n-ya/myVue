@@ -16,7 +16,7 @@ let activeEffect: EffectFunction
 const effectStack: EffectFunction[] = []
 
 // 响应式数据
-const data = { ok: true, text: "hello world!" }
+const data = { ok: true, text: "hello world!", val: 1 }
 
 function track(target: object, key: string | symbol) {
     if (!activeEffect) {
@@ -51,7 +51,13 @@ function trigger(target: object, key: string | symbol) {
     const effects = depsMap.get(key)
 
     // 在临时容器中执行 防止无线循环
-    const effectsToRun = new Set<EffectFunction>(effects)
+    const effectsToRun = new Set<EffectFunction>()
+    effects && effects.forEach(effectFn => {
+        // 如果trigger触发执行的副作用函数与当前正在执行的副作用函数相同，就不执行了, 防止栈溢出
+        if (effectFn != activeEffect) {
+            effectsToRun.add(effectFn)
+        }
+    })
     effectsToRun && effectsToRun.forEach(effectFn => effectFn())
 }
 
@@ -101,7 +107,17 @@ function effect(fn: Fn) {
 function test() {
     // test_basic()
     // test_branch()
-    test_recursion()
+    // test_recursion()
+    test_stackoverflow()
+}
+
+// 避免无线递归，栈溢出
+function test_stackoverflow() {
+    effect(() => {
+        // 下面这个操作既有读 又有写，会导致无限递归
+        obj.val ++
+    })
+    console.log(obj.val)
 }
 
 // 嵌套测试
