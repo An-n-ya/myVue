@@ -92,7 +92,9 @@ function trigger(target: object, key: string | symbol, type: SetType) {
 }
 
 
-function createReactive(obj, isShallow = false) {
+// 第二个参数代表是否浅响应
+// 第三个参数代表是否只读（如果只读，就不会建立响应了）
+function createReactive(obj, isShallow = false, isReadOnly = false) {
     return new Proxy(obj, {
         get(target: any, p: string | symbol, receiver: any): any {
             // target的__raw是框架使用的属性，用来返回原始数据
@@ -107,15 +109,23 @@ function createReactive(obj, isShallow = false) {
                 // 如果是浅响应，直接返回
                 return res
             }
-            track(target, p)
+            if (!isReadOnly) {
+                track(target, p)
+            }
 
             if (typeof res === "object" && res !== null) {
                 // 如果res是对象，就继续调用reactive，使得对象的深层结构也响应
-                return reactive(res)
+                // 如果数据只读，对象的所有属性也是只读
+                return isReadOnly ? readonly(res) : reactive(res)
             }
             return res
         },
         set(target: any, p: string | symbol, value: any, receiver: any): boolean {
+            if (isReadOnly) {
+                // 如果是只读，拒绝修改，直接返回
+                console.warn(`属性${String(p)}是只读的`)
+                return true
+            }
             // 先获取旧值
             const oldVal = target[p]
             // 用来区分是添加还是修改，方便trigger区分
@@ -147,6 +157,11 @@ function createReactive(obj, isShallow = false) {
         },
         // 代理删除 delete
         deleteProperty(target: { val: number; foo: number; text: string; ok: boolean }, p: string | symbol): boolean {
+            if (isReadOnly) {
+                // 如果是只读，拒绝删除，直接返回
+                console.warn(`属性${String(p)}是只读的`)
+                return true
+            }
             const hadKey = Object.prototype.hasOwnProperty.call(target, p)
             const res = Reflect.deleteProperty(target, p)
             // 只有在删除成功时，才触发trigger
@@ -164,6 +179,14 @@ function reactive(obj) {
 
 function shallowReactive(obj) {
     return createReactive(obj, true)
+}
+
+function readonly(obj) {
+    return createReactive(obj, false, true)
+}
+
+function shallowReadonly(obj) {
+    return createReactive(obj, true, true)
 }
 
 function cleanup(effectFn: EffectFunction) {
@@ -288,7 +311,30 @@ function test() {
     // test_lazy()
     // test_computed()
     // test_computed_with_recursion()
-    test_watch()
+    // test_watch()
+    test_reactive()
+}
+
+// 测试深浅响应 与 只读
+function test_reactive() {
+    const data = {foo: {bar : 1}}
+    const obj = reactive(data)
+    effect(() => {
+        console.log(obj.foo.bar + "改变啦！")
+    })
+    obj.foo.bar++;
+
+    const shallowObj = shallowReactive(data)
+    effect(() => {
+        console.log(shallowObj.foo.bar + "shallowObj你应该只看到我一次")
+    })
+    shallowObj.foo.bar++;
+
+    const readonlyObj = readonly(data)
+    effect(() => {
+        console.log(readonlyObj.foo.bar + "readonlyObj你应该只看到我一次")
+    })
+    readonlyObj.foo.bar = 100
 }
 
 // 测试watch

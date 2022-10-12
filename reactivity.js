@@ -1,3 +1,4 @@
+var ITERATE_KEY = Symbol();
 // 用来存储副作用函数的容器
 // 使用weakMap作用容器
 // 这里使用weakMap的原因是，在被代理对象引用失效后，不持续引用， 方便垃圾回收
@@ -6,8 +7,6 @@ var bucket = new WeakMap();
 var activeEffect;
 // 使用一个栈存放effect函数
 var effectStack = [];
-// 响应式数据
-var data = { ok: true, text: "hello world!", val: 1, foo: 2 };
 function track(target, key) {
     if (!activeEffect) {
         // 如果没有activeEffect，直接返回
@@ -31,21 +30,34 @@ function track(target, key) {
     // 将deps添加到 activeEffect.deps 中去
     activeEffect.deps.push(deps);
 }
-function trigger(target, key) {
+function trigger(target, key, type) {
     // 取出depsMap
     var depsMap = bucket.get(target);
     if (!depsMap)
         return;
     // 根据key取出相应的副作用函数们
     var effects = depsMap.get(key);
-    // 在临时容器中执行 防止无线循环
+    // 取得与 ITERATE_KEY 相关的副作用函数
+    var iterateEffects = depsMap.get(ITERATE_KEY);
+    // 在临时容器中执行 防止无限循环
     var effectsToRun = new Set();
+    // 与 key 相关的副作用添加到effectToRun
     effects && effects.forEach(function (effectFn) {
         // 如果trigger触发执行的副作用函数与当前正在执行的副作用函数相同，就不执行了, 防止栈溢出
         if (effectFn != activeEffect) {
             effectsToRun.add(effectFn);
         }
     });
+    // 只有在"添加" 或 "删除" 时，才触发ITERATE_KEY相关的副作用
+    if (type == "ADD" || type == "DELETE") {
+        // 与 ITERATE_KEY 相关的副作用添加到effectToRun
+        iterateEffects && iterateEffects.forEach(function (effectFn) {
+            // 如果trigger触发执行的副作用函数与当前正在执行的副作用函数相同，就不执行了, 防止栈溢出
+            if (effectFn != activeEffect) {
+                effectsToRun.add(effectFn);
+            }
+        });
+    }
     effectsToRun && effectsToRun.forEach(function (effectFn) {
         if (effectFn.options.scheduler) {
             // 如果有调度函数
@@ -57,18 +69,97 @@ function trigger(target, key) {
         }
     });
 }
-var obj = new Proxy(data, {
-    get: function (target, p, receiver) {
-        track(target, p);
-        // 返回p索引的值
-        return target[p];
-    },
-    set: function (target, p, value, receiver) {
-        target[p] = value;
-        trigger(target, p);
-        return true;
-    }
-});
+// 第二个参数代表是否浅响应
+// 第三个参数代表是否只读（如果只读，就不会建立响应了）
+function createReactive(obj, isShallow, isReadOnly) {
+    if (isShallow === void 0) { isShallow = false; }
+    if (isReadOnly === void 0) { isReadOnly = false; }
+    return new Proxy(obj, {
+        get: function (target, p, receiver) {
+            // target的__raw是框架使用的属性，用来返回原始数据
+            if (p === "__raw") {
+                return target;
+            }
+            // 返回p索引的值
+            // 使用Reflect.get把receiver传递进去，使target里的this指向代理对象，从而方便建立响应
+            var res = Reflect.get(target, p, receiver);
+            if (isShallow) {
+                // 如果是浅响应，直接返回
+                return res;
+            }
+            if (!isReadOnly) {
+                track(target, p);
+            }
+            if (typeof res === "object" && res !== null) {
+                // 如果res是对象，就继续调用reactive，使得对象的深层结构也响应
+                // 如果数据只读，对象的所有属性也是只读
+                return isReadOnly ? readonly(res) : reactive(res);
+            }
+            return res;
+        },
+        set: function (target, p, value, receiver) {
+            if (isReadOnly) {
+                // 如果是只读，拒绝修改，直接返回
+                console.warn("\u5C5E\u6027" + String(p) + "\u662F\u53EA\u8BFB\u7684");
+                return true;
+            }
+            // 先获取旧值
+            var oldVal = target[p];
+            // 用来区分是添加还是修改，方便trigger区分
+            var type = Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD";
+            // Reflect代替直接赋值
+            var res = Reflect.set(target, p, value, receiver);
+            // 只有在receiver是target的代理对象时，才触发trigger
+            // 这个条件是为了防止在原型链上查找时，触发trigger
+            if (target === receiver["__raw"]) {
+                // 比较新值和旧值，只有在不相同时才触发trigger(同时需要处理NaN)
+                if (target !== value && (oldVal === oldVal || value === value)) {
+                    trigger(target, p, type);
+                }
+            }
+            return res;
+        },
+        // 代理 key in obj
+        has: function (target, p) {
+            // 建立依赖追踪
+            track(target, p);
+            return Reflect.has(target, p);
+        },
+        // 代理 for ... in
+        ownKeys: function (target) {
+            // 建立target 与 ITERATE_KEY的依赖
+            track(target, ITERATE_KEY);
+            return Reflect.ownKeys(target);
+        },
+        // 代理删除 delete
+        deleteProperty: function (target, p) {
+            if (isReadOnly) {
+                // 如果是只读，拒绝删除，直接返回
+                console.warn("\u5C5E\u6027" + String(p) + "\u662F\u53EA\u8BFB\u7684");
+                return true;
+            }
+            var hadKey = Object.prototype.hasOwnProperty.call(target, p);
+            var res = Reflect.deleteProperty(target, p);
+            // 只有在删除成功时，才触发trigger
+            if (hadKey && res) {
+                trigger(target, p, "DELETE");
+            }
+            return res;
+        }
+    });
+}
+function reactive(obj) {
+    return createReactive(obj);
+}
+function shallowReactive(obj) {
+    return createReactive(obj, true);
+}
+function readonly(obj) {
+    return createReactive(obj, false, true);
+}
+function shallowReadonly(obj) {
+    return createReactive(obj, true, true);
+}
 function cleanup(effectFn) {
     for (var i = 0; i < effectFn.deps.length; i++) {
         // 将effectFn从它的依赖集合中删除
@@ -128,7 +219,7 @@ function computed(getter) {
             // 在改变的时候重置dirty
             dirty = true;
             // 当计算属性依赖的响应式数据变化时，手动调用trigger
-            trigger(obj, 'value');
+            trigger(obj, 'value', 'SET');
         } });
     var obj = {
         get value() {
@@ -172,6 +263,9 @@ function effect(fn, options) {
     }
     return effectFn;
 }
+// 响应式数据
+var data = { ok: true, text: "hello world!", val: 1, foo: 2 };
+var obj = reactive(data);
 function test() {
     // test_basic()
     // test_branch()
@@ -181,7 +275,27 @@ function test() {
     // test_lazy()
     // test_computed()
     // test_computed_with_recursion()
-    test_watch();
+    // test_watch()
+    test_reactive();
+}
+// 测试深浅响应 与 只读
+function test_reactive() {
+    var data = { foo: { bar: 1 } };
+    var obj = reactive(data);
+    effect(function () {
+        console.log(obj.foo.bar + "改变啦！");
+    });
+    obj.foo.bar++;
+    var shallowObj = shallowReactive(data);
+    effect(function () {
+        console.log(shallowObj.foo.bar + "你应该只看到我一次");
+    });
+    shallowObj.foo.bar++;
+    var readonlyObj = readonly(data);
+    effect(function () {
+        console.log(readonlyObj.foo.bar + "你应该只看到我一次");
+    });
+    readonlyObj.foo.bar = 100;
 }
 // 测试watch
 function test_watch() {
