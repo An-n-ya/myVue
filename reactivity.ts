@@ -81,7 +81,8 @@ const obj = new Proxy(data, {
     get(target: any, p: string | symbol, receiver: any): any {
         track(target, p)
         // 返回p索引的值
-        return target[p]
+        // 使用Reflect.get把receiver传递进去，使target里的this指向代理对象，从而方便建立响应
+        return Reflect.get(target, p, receiver)
     },
     set(target: any, p: string | symbol, value: any, receiver: any): boolean {
         target[p] = value
