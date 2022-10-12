@@ -12,6 +12,9 @@ type EffectOptions = {
     scheduler?: SchedulerFunction
     lazy?: boolean
 }
+type SetType = "SET" | "ADD" | "DELETE"
+
+const ITERATE_KEY = Symbol()
 
 // 用来存储副作用函数的容器
 // 使用weakMap作用容器
@@ -50,21 +53,35 @@ function track(target: object, key: string | symbol) {
     activeEffect.deps.push(deps)
 }
 
-function trigger(target: object, key: string | symbol) {
+function trigger(target: object, key: string | symbol, type: SetType) {
     // 取出depsMap
     const depsMap = bucket.get(target)
     if (!depsMap) return
     // 根据key取出相应的副作用函数们
     const effects = depsMap.get(key)
 
-    // 在临时容器中执行 防止无线循环
+    // 取得与 ITERATE_KEY 相关的副作用函数
+    const iterateEffects = depsMap.get(ITERATE_KEY)
+
+    // 在临时容器中执行 防止无限循环
     const effectsToRun = new Set<EffectFunction>()
+    // 与 key 相关的副作用添加到effectToRun
     effects && effects.forEach(effectFn => {
         // 如果trigger触发执行的副作用函数与当前正在执行的副作用函数相同，就不执行了, 防止栈溢出
         if (effectFn != activeEffect) {
             effectsToRun.add(effectFn)
         }
     })
+    // 只有在"添加" 或 "删除" 时，才触发ITERATE_KEY相关的副作用
+    if (type == "ADD" || type == "DELETE") {
+        // 与 ITERATE_KEY 相关的副作用添加到effectToRun
+        iterateEffects && iterateEffects.forEach(effectFn => {
+            // 如果trigger触发执行的副作用函数与当前正在执行的副作用函数相同，就不执行了, 防止栈溢出
+            if (effectFn != activeEffect) {
+                effectsToRun.add(effectFn)
+            }
+        })
+    }
     effectsToRun && effectsToRun.forEach(effectFn => {
         if (effectFn.options.scheduler) {
             // 如果有调度函数
@@ -85,9 +102,34 @@ const obj = new Proxy(data, {
         return Reflect.get(target, p, receiver)
     },
     set(target: any, p: string | symbol, value: any, receiver: any): boolean {
-        target[p] = value
-        trigger(target, p)
-        return true
+        // 用来区分是添加还是修改，方便trigger区分
+        const type = Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD"
+        // Reflect代替直接赋值
+        const res = Reflect.set(target, p, value, receiver)
+        trigger(target, p, type)
+        return res
+    },
+    // 代理 key in obj
+    has(target: { val: number; foo: number; text: string; ok: boolean }, p: string | symbol): boolean {
+        // 建立依赖追踪
+        track(target, p)
+        return Reflect.has(target, p)
+    },
+    // 代理 for ... in
+    ownKeys(target: { val: number; foo: number; text: string; ok: boolean }): ArrayLike<string | symbol> {
+        // 建立target 与 ITERATE_KEY的依赖
+        track(target, ITERATE_KEY)
+        return Reflect.ownKeys(target)
+    },
+    // 代理删除 delete
+    deleteProperty(target: { val: number; foo: number; text: string; ok: boolean }, p: string | symbol): boolean {
+        const hadKey = Object.prototype.hasOwnProperty.call(target, p)
+        const res = Reflect.deleteProperty(target, p)
+        // 只有在删除成功时，才触发trigger
+        if (hadKey && res) {
+            trigger(target, p, "DELETE")
+        }
+        return res
     }
 })
 
@@ -153,7 +195,7 @@ function computed(getter: Fn) {
             // 在改变的时候重置dirty
             dirty = true
             // 当计算属性依赖的响应式数据变化时，手动调用trigger
-            trigger(obj, 'value')
+            trigger(obj, 'value', 'SET')
         }})
     const obj = {
         get value() {
