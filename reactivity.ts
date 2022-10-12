@@ -25,8 +25,6 @@ let activeEffect: EffectFunction
 // 使用一个栈存放effect函数
 const effectStack: EffectFunction[] = []
 
-// 响应式数据
-const data = { ok: true, text: "hello world!", val: 1, foo: 2 }
 
 function track(target: object, key: string | symbol) {
     if (!activeEffect) {
@@ -94,44 +92,61 @@ function trigger(target: object, key: string | symbol, type: SetType) {
 }
 
 
-const obj = new Proxy(data, {
-    get(target: any, p: string | symbol, receiver: any): any {
-        track(target, p)
-        // 返回p索引的值
-        // 使用Reflect.get把receiver传递进去，使target里的this指向代理对象，从而方便建立响应
-        return Reflect.get(target, p, receiver)
-    },
-    set(target: any, p: string | symbol, value: any, receiver: any): boolean {
-        // 用来区分是添加还是修改，方便trigger区分
-        const type = Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD"
-        // Reflect代替直接赋值
-        const res = Reflect.set(target, p, value, receiver)
-        trigger(target, p, type)
-        return res
-    },
-    // 代理 key in obj
-    has(target: { val: number; foo: number; text: string; ok: boolean }, p: string | symbol): boolean {
-        // 建立依赖追踪
-        track(target, p)
-        return Reflect.has(target, p)
-    },
-    // 代理 for ... in
-    ownKeys(target: { val: number; foo: number; text: string; ok: boolean }): ArrayLike<string | symbol> {
-        // 建立target 与 ITERATE_KEY的依赖
-        track(target, ITERATE_KEY)
-        return Reflect.ownKeys(target)
-    },
-    // 代理删除 delete
-    deleteProperty(target: { val: number; foo: number; text: string; ok: boolean }, p: string | symbol): boolean {
-        const hadKey = Object.prototype.hasOwnProperty.call(target, p)
-        const res = Reflect.deleteProperty(target, p)
-        // 只有在删除成功时，才触发trigger
-        if (hadKey && res) {
-            trigger(target, p, "DELETE")
+function reactive(obj) {
+    return new Proxy(obj, {
+        get(target: any, p: string | symbol, receiver: any): any {
+            // target的__raw是框架使用的属性，用来返回原始数据
+            if (p === "__raw") {
+                return target
+            }
+
+            track(target, p)
+            // 返回p索引的值
+            // 使用Reflect.get把receiver传递进去，使target里的this指向代理对象，从而方便建立响应
+            return Reflect.get(target, p, receiver)
+        },
+        set(target: any, p: string | symbol, value: any, receiver: any): boolean {
+            // 先获取旧值
+            const oldVal = target[p]
+            // 用来区分是添加还是修改，方便trigger区分
+            const type = Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD"
+            // Reflect代替直接赋值
+            const res = Reflect.set(target, p, value, receiver)
+
+            // 只有在receiver是target的代理对象时，才触发trigger
+            // 这个条件是为了防止在原型链上查找时，触发trigger
+            if (target === receiver.raw) {
+                // 比较新值和旧值，只有在不相同时才触发trigger(同时需要处理NaN)
+                if (target !== value && (oldVal === oldVal || value === value)) {
+                    trigger(target, p, type)
+                }
+            }
+            return res
+        },
+        // 代理 key in obj
+        has(target: { val: number; foo: number; text: string; ok: boolean }, p: string | symbol): boolean {
+            // 建立依赖追踪
+            track(target, p)
+            return Reflect.has(target, p)
+        },
+        // 代理 for ... in
+        ownKeys(target: { val: number; foo: number; text: string; ok: boolean }): ArrayLike<string | symbol> {
+            // 建立target 与 ITERATE_KEY的依赖
+            track(target, ITERATE_KEY)
+            return Reflect.ownKeys(target)
+        },
+        // 代理删除 delete
+        deleteProperty(target: { val: number; foo: number; text: string; ok: boolean }, p: string | symbol): boolean {
+            const hadKey = Object.prototype.hasOwnProperty.call(target, p)
+            const res = Reflect.deleteProperty(target, p)
+            // 只有在删除成功时，才触发trigger
+            if (hadKey && res) {
+                trigger(target, p, "DELETE")
+            }
+            return res
         }
-        return res
-    }
-})
+    })
+}
 
 function cleanup(effectFn: EffectFunction) {
     for (let i = 0; i < effectFn.deps.length; i ++) {
@@ -241,6 +256,10 @@ function effect(fn: Fn, options: EffectOptions = {}) {
     }
     return effectFn
 }
+
+// 响应式数据
+const data = { ok: true, text: "hello world!", val: 1, foo: 2 }
+const obj = reactive(data)
 
 function test() {
     // test_basic()
