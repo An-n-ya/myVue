@@ -71,14 +71,24 @@ function trigger(target: object, key: string | symbol, type: SetType) {
         }
     })
     // 只有在"添加" 或 "删除" 时，才触发ITERATE_KEY相关的副作用
-    if (type == "ADD" || type == "DELETE") {
+    if (type === "ADD" || type === "DELETE") {
         // 与 ITERATE_KEY 相关的副作用添加到effectToRun
         iterateEffects && iterateEffects.forEach(effectFn => {
-            // 如果trigger触发执行的副作用函数与当前正在执行的副作用函数相同，就不执行了, 防止栈溢出
             if (effectFn != activeEffect) {
                 effectsToRun.add(effectFn)
             }
         })
+    }
+    // 在添加时，如果目标对象是数组，就执行与length相关的副作用。（原因是，js引擎在修改数组的时候会访问length属性，从而建立依赖）
+    if (type === "ADD" && Array.isArray(target)) {
+        const lengthEffect = depsMap.get("length")
+        // 将lengthEffect都加入effectsToRun
+        lengthEffect && lengthEffect.forEach(effectFn => {
+            if (effectFn != activeEffect) {
+                effectsToRun.add(effectFn)
+            }
+        })
+
     }
     effectsToRun && effectsToRun.forEach(effectFn => {
         if (effectFn.options.scheduler) {
@@ -129,7 +139,11 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
             // 先获取旧值
             const oldVal = target[p]
             // 用来区分是添加还是修改，方便trigger区分
-            const type = Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD"
+            const type = Array.isArray(target)
+                // 判断代理目标是否是数组
+                // 再根据对应的标准判断是添加还是修改
+                ? Number(p) < target.length ? "SET" : "ADD"
+                : Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD"
             // Reflect代替直接赋值
             const res = Reflect.set(target, p, value, receiver)
 
@@ -312,7 +326,18 @@ function test() {
     // test_computed()
     // test_computed_with_recursion()
     // test_watch()
-    test_reactive()
+    // test_reactive()
+    test_array()
+}
+
+// 测试数组
+function test_array() {
+    const data = [1]
+    const obj = reactive(data)
+    effect(() => {
+        console.log(obj.length)
+    })
+    obj[1] = 2
 }
 
 // 测试深浅响应 与 只读
