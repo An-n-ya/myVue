@@ -16,6 +16,14 @@ type SetType = "SET" | "ADD" | "DELETE"
 
 const ITERATE_KEY = Symbol()
 
+function getType(obj) {
+    const type = Object.prototype.toString.call(obj).match(/^\[object (.*)\]$/)[1].toLowerCase();
+    if(type === 'string' && typeof obj === 'object') return 'object'; // Let "new String('')" return 'object'
+    if (obj === null) return 'null'; // PhantomJS has type "DOMWindow" for null
+    if (obj === undefined) return 'undefined'; // PhantomJS has type "DOMWindow" for undefined
+    return type;
+}
+
 // 用来存储副作用函数的容器
 // 使用weakMap作用容器
 // 这里使用weakMap的原因是，在被代理对象引用失效后，不持续引用， 方便垃圾回收
@@ -116,6 +124,15 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
             // 如果是数组，并且访问的是已经被重写的方法，直接返回
             if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(p)) {
                 return Reflect.get(arrayInstrumentations, p, receiver)
+            }
+
+            if (getType(target) == 'map') {
+                if (p == 'size') {
+                    track(target, ITERATE_KEY)
+                    return Reflect.get(target, p, target)
+                }
+
+                return target[p].bind(target)
             }
 
             // 返回p索引的值
@@ -383,8 +400,19 @@ const obj = reactive(data)
     // test_computed_with_recursion()
     // test_watch()
     // test_reactive()
-    test_array()
+    // test_array()
+    test_map()
 })()
+
+// 测试map
+function test_map() {
+    const proxy = reactive(new Map([['key', 1]]))
+    effect(() => {
+        console.log(proxy.get("key"))
+    })
+
+    proxy.set('key', 2)
+}
 
 // 测试数组
 function test_array() {

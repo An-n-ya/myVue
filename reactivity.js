@@ -1,4 +1,14 @@
 var ITERATE_KEY = Symbol();
+function getType(obj) {
+    var type = Object.prototype.toString.call(obj).match(/^\[object (.*)\]$/)[1].toLowerCase();
+    if (type === 'string' && typeof obj === 'object')
+        return 'object'; // Let "new String('')" return 'object'
+    if (obj === null)
+        return 'null'; // PhantomJS has type "DOMWindow" for null
+    if (obj === undefined)
+        return 'undefined'; // PhantomJS has type "DOMWindow" for undefined
+    return type;
+}
 // 用来存储副作用函数的容器
 // 使用weakMap作用容器
 // 这里使用weakMap的原因是，在被代理对象引用失效后，不持续引用， 方便垃圾回收
@@ -93,6 +103,13 @@ function createReactive(obj, isShallow, isReadOnly) {
             // 如果是数组，并且访问的是已经被重写的方法，直接返回
             if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(p)) {
                 return Reflect.get(arrayInstrumentations, p, receiver);
+            }
+            if (getType(target) == 'map') {
+                if (p == 'size') {
+                    track(target, ITERATE_KEY);
+                    return Reflect.get(target, p, target);
+                }
+                return target[p].bind(target);
             }
             // 返回p索引的值
             // 使用Reflect.get把receiver传递进去，使target里的this指向代理对象，从而方便建立响应
@@ -319,7 +336,7 @@ var arrayInstrumentations = {
 });
 // 用一个变量表示是否允许跟踪，默认值为true
 var shouldTrack = true;
-["push"].forEach(function (method) {
+["push", "pop", "shift", "unshift", "splice"].forEach(function (method) {
     // 获取原始方法
     var originMethod = Array.prototype[method];
     arrayInstrumentations[method] = function () {
@@ -348,8 +365,17 @@ var obj = reactive(data);
     // test_computed_with_recursion()
     // test_watch()
     // test_reactive()
-    test_array();
+    // test_array()
+    test_map();
 })();
+// 测试map
+function test_map() {
+    var proxy = reactive(new Map([['key', 1]]));
+    effect(function () {
+        console.log(proxy.get("key"));
+    });
+    proxy.set('key', 2);
+}
 // 测试数组
 function test_array() {
     var data = [1];
