@@ -1,3 +1,14 @@
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
 var ITERATE_KEY = Symbol();
 function getType(obj) {
     var type = Object.prototype.toString.call(obj).match(/^\[object (.*)\]$/)[1].toLowerCase();
@@ -123,6 +134,10 @@ function createReactive(obj, isShallow, isReadOnly) {
                 track(target, p);
             }
             if (typeof res === "object" && res !== null) {
+                if (res.__v_isRef) {
+                    // 如果是ref对象，脱钩ref
+                    return res.value;
+                }
                 // 如果res是对象，就继续调用reactive，使得对象的深层结构也响应
                 // 如果数据只读，对象的所有属性也是只读
                 return isReadOnly ? readonly(res) : reactive(res);
@@ -143,6 +158,14 @@ function createReactive(obj, isShallow, isReadOnly) {
                 // 再根据对应的标准判断是添加还是修改
                 ? Number(p) < target.length ? "SET" : "ADD"
                 : Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD";
+            if (target.__v_isRef) {
+                // 如果是ref对象
+                // 先取出来
+                var vv = target[p];
+                // 再赋值
+                vv.value = value;
+                return true;
+            }
             // Reflect代替直接赋值
             var res = Reflect.set(target, p, value, receiver);
             // 只有在receiver是target的代理对象时，才触发trigger
@@ -312,10 +335,51 @@ function effect(fn, options) {
     }
     return effectFn;
 }
+function toRefs(obj) {
+    var ret = [];
+    for (var key in obj) {
+        ret[key] = toRef(obj, key);
+    }
+    return ret;
+}
+function toRef(obj, key) {
+    var wrapper = {
+        get value() {
+            return obj[key];
+        },
+        set value(val) {
+            obj[key] = val;
+        }
+    };
+    // 定义 __v_isRef 属性
+    Object.defineProperty(wrapper, "__v_isRef", { value: true });
+    return wrapper;
+}
+function proxyRefs(target) {
+    return new Proxy(target, {
+        get: function (target, key, receiver) {
+            var value = Reflect.get(target, key, receiver);
+            console.log(value);
+            console.log(target);
+            // 判断是否是ref属性，从而实现ref脱钩
+            return value.__v_isRef ? value.value : value;
+        },
+        set: function (target, key, newValue, receiver) {
+            var value = target[key];
+            if (value.__v_isRef) {
+                value.value = newValue;
+                return true;
+            }
+            return Reflect.set(target, key, newValue, receiver);
+        }
+    });
+}
 function ref(val) {
     // 把原始值包裹
     // 然后再进行代理
     var wrapper = { value: val };
+    // 用来区分一个数据是否是ref
+    Object.defineProperty(wrapper, "__v_isRef", { value: true });
     return reactive(wrapper);
 }
 // 重写array的方法
@@ -374,14 +438,31 @@ var obj = reactive(data);
     // test_array()
     // test_map()
     test_ref();
+    // test_reactive_lost()
 })();
+// 处理响应丢失
+function test_reactive_lost() {
+    var obj = reactive({ foo: 1, bar: 2 });
+    var newObj = proxyRefs(__assign({}, toRefs(obj)));
+    effect(function () {
+        console.log(newObj.foo);
+    });
+    obj.foo = 100;
+}
 // 测试原始值的响应
 function test_ref() {
     var refV = ref(1);
+    //
+    // effect(() => {
+    //     console.log(refV.value)
+    // })
+    // refV.value = 2
+    var obj = reactive({ refV: refV });
     effect(function () {
-        console.log(refV.value);
+        // reactive的脱钩
+        console.log(obj.refV);
     });
-    refV.value = 2;
+    obj.refV = 2;
 }
 // 测试map
 function test_map() {

@@ -148,10 +148,15 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
             }
 
             if (typeof res === "object" && res !== null) {
+                if (res.__v_isRef) {
+                    // 如果是ref对象，脱钩ref
+                    return res.value
+                }
                 // 如果res是对象，就继续调用reactive，使得对象的深层结构也响应
                 // 如果数据只读，对象的所有属性也是只读
                 return isReadOnly ? readonly(res) : reactive(res)
             }
+
             return res
         },
         set(target: any, p: string | symbol, value: any, receiver: any): boolean {
@@ -168,6 +173,14 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
                 // 再根据对应的标准判断是添加还是修改
                 ? Number(p) < target.length ? "SET" : "ADD"
                 : Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD"
+            if (target.__v_isRef) {
+                // 如果是ref对象
+                // 先取出来
+                const vv = target[p]
+                // 再赋值
+                vv.value = value
+                return true
+            }
             // Reflect代替直接赋值
             const res = Reflect.set(target, p, value, receiver)
 
@@ -350,6 +363,49 @@ function effect(fn: Fn, options: EffectOptions = {}) {
     return effectFn
 }
 
+function toRefs(obj) {
+    const ret = []
+
+    for (const key in obj) {
+        ret[key] = toRef(obj, key)
+    }
+    return ret
+}
+
+function toRef(obj, key) {
+    const wrapper = {
+        get value() {
+            return obj[key]
+        },
+        set value(val) {
+            obj[key] = val
+        }
+    }
+    // 定义 __v_isRef 属性
+    Object.defineProperty(wrapper, "__v_isRef", {value: true})
+    return wrapper
+}
+
+function proxyRefs(target) {
+    return new Proxy(target, {
+        get(target, key, receiver) {
+            const value = Reflect.get(target, key, receiver)
+            console.log(value)
+            console.log(target)
+            // 判断是否是ref属性，从而实现ref脱钩
+            return value.__v_isRef ? value.value : value
+        },
+        set(target, key, newValue, receiver) {
+            const value = target[key]
+            if (value.__v_isRef) {
+                value.value = newValue
+                return true
+            }
+            return Reflect.set(target, key, newValue, receiver)
+        }
+    })
+}
+
 function ref(val) {
     // 把原始值包裹
     // 然后再进行代理
@@ -414,17 +470,36 @@ const obj = reactive(data)
     // test_array()
     // test_map()
     test_ref()
+    // test_reactive_lost()
 })()
+
+// 处理响应丢失
+function test_reactive_lost() {
+    const obj = reactive({foo: 1, bar: 2})
+    const newObj: any = proxyRefs({...toRefs(obj)})
+    effect(() => {
+        console.log(newObj.foo)
+    })
+    obj.foo = 100
+}
 
 // 测试原始值的响应
 function test_ref() {
     const refV = ref(1)
+    //
+    // effect(() => {
+    //     console.log(refV.value)
+    // })
 
+    // refV.value = 2
+
+    const obj = reactive({refV})
     effect(() => {
-        console.log(refV.value)
+        // reactive的脱钩
+        console.log(obj.refV)
     })
 
-    refV.value = 2
+    obj.refV = 2
 }
 
 
