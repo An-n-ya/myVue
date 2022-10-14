@@ -312,6 +312,12 @@ function effect(fn, options) {
     }
     return effectFn;
 }
+function ref(val) {
+    // 把原始值包裹
+    // 然后再进行代理
+    var wrapper = { value: val };
+    return reactive(wrapper);
+}
 // 重写array的方法
 var arrayInstrumentations = {
     includes: function () {
@@ -366,8 +372,17 @@ var obj = reactive(data);
     // test_watch()
     // test_reactive()
     // test_array()
-    test_map();
+    // test_map()
+    test_ref();
 })();
+// 测试原始值的响应
+function test_ref() {
+    var refV = ref(1);
+    effect(function () {
+        console.log(refV.value);
+    });
+    refV.value = 2;
+}
 // 测试map
 function test_map() {
     var proxy = reactive(new Map([['key', 1]]));

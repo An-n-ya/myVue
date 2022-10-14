@@ -350,6 +350,17 @@ function effect(fn: Fn, options: EffectOptions = {}) {
     return effectFn
 }
 
+function ref(val) {
+    // 把原始值包裹
+    // 然后再进行代理
+    const wrapper = {value: val}
+
+    // 用来区分一个数据是否是ref
+    Object.defineProperty(wrapper, "__v_isRef", {value: true})
+
+    return reactive(wrapper)
+}
+
 // 重写array的方法
 const arrayInstrumentations = {
     includes: function () {
@@ -401,8 +412,21 @@ const obj = reactive(data)
     // test_watch()
     // test_reactive()
     // test_array()
-    test_map()
+    // test_map()
+    test_ref()
 })()
+
+// 测试原始值的响应
+function test_ref() {
+    const refV = ref(1)
+
+    effect(() => {
+        console.log(refV.value)
+    })
+
+    refV.value = 2
+}
+
 
 // 测试map
 function test_map() {
