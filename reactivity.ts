@@ -27,7 +27,8 @@ const effectStack: EffectFunction[] = []
 
 
 function track(target: object, key: string | symbol) {
-    if (!activeEffect) {
+    if (!activeEffect || !shouldTrack) {
+        // 如果禁止跟踪，直接返回
         // 如果没有activeEffect，直接返回
         return
     }
@@ -112,6 +113,11 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
                 return target
             }
 
+            // 如果是数组，并且访问的是已经被重写的方法，直接返回
+            if (Array.isArray(target) && arrayInstrumentations.hasOwnProperty(p)) {
+                return Reflect.get(arrayInstrumentations, p, receiver)
+            }
+
             // 返回p索引的值
             // 使用Reflect.get把receiver传递进去，使target里的this指向代理对象，从而方便建立响应
             const res =  Reflect.get(target, p, receiver)
@@ -119,7 +125,8 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
                 // 如果是浅响应，直接返回
                 return res
             }
-            if (!isReadOnly) {
+            if (!isReadOnly && typeof p !== 'symbol') {
+                // 只对非只读和非symbol的属性跟踪
                 track(target, p)
             }
 
@@ -166,9 +173,11 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
         // 代理 for ... in
         ownKeys(target: { val: number; foo: number; text: string; ok: boolean }): ArrayLike<string | symbol> {
             // 建立target 与 ITERATE_KEY的依赖
-            track(target, ITERATE_KEY)
+            // 如果是数组的话，用length建立响应联系
+            track(target, Array.isArray(target) ? "length" : ITERATE_KEY)
             return Reflect.ownKeys(target)
         },
+        // 代理 for ... of
         // 代理删除 delete
         deleteProperty(target: { val: number; foo: number; text: string; ok: boolean }, p: string | symbol): boolean {
             if (isReadOnly) {
@@ -183,12 +192,24 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
                 trigger(target, p, "DELETE")
             }
             return res
-        }
+        },
+
     })
 }
 
+// 建立原始值和代理对象之间的map
+const reactiveMap = new Map()
 function reactive(obj) {
-    return createReactive(obj)
+    // 如果reactiveMap里已经有了，就直接返回
+    const existProxy = reactiveMap.get(obj)
+    if (existProxy) return existProxy
+
+    // 否则创建新的
+    const proxy = createReactive(obj)
+    // 再存到map中
+    // 要用set方法设置，不要直接用[]表达式设置
+    reactiveMap.set(obj, proxy)
+    return proxy
 }
 
 function shallowReactive(obj) {
@@ -312,11 +333,46 @@ function effect(fn: Fn, options: EffectOptions = {}) {
     return effectFn
 }
 
+// 重写array的方法
+const arrayInstrumentations = {
+    includes: function () {
+    }
+}
+
+;["includes", "indexOf", "lastIndexOf"].forEach(method => {
+    // 获取原始方法
+    const originMethod = Array.prototype[method]
+    arrayInstrumentations[method] = function(...args) {
+        // 先获取原始方法的返回值
+        let res = originMethod.apply(this, args)
+
+        // 如果没找到, 就用原始值找找看
+        if (res == false) {
+            res = originMethod.apply(this.__raw, args)
+        }
+        return res
+    }
+})
+
+// 用一个变量表示是否允许跟踪，默认值为true
+let shouldTrack = true
+;["push", "pop", "shift", "unshift", "splice"].forEach((method) => {
+    // 获取原始方法
+    const originMethod = Array.prototype[method]
+    arrayInstrumentations[method] = function (...args) {
+        // 在调用原始方法前，先禁止跟踪
+        shouldTrack = false
+        let res = originMethod.apply(this, args)
+        shouldTrack = true
+        return res
+    }
+})
+
 // 响应式数据
 const data = { ok: true, text: "hello world!", val: 1, foo: 2 }
 const obj = reactive(data)
 
-function test() {
+;(function test() {
     // test_basic()
     // test_branch()
     // test_recursion()
@@ -328,7 +384,7 @@ function test() {
     // test_watch()
     // test_reactive()
     test_array()
-}
+})()
 
 // 测试数组
 function test_array() {
@@ -338,6 +394,27 @@ function test_array() {
         console.log(obj.length)
     })
     obj[1] = 2
+
+    // 代理for ... of
+    const data2 = [1, 2, 3, 4, 5]
+    const obj2 = reactive(data2)
+    effect(() => {
+        for (const i of obj2) {
+            console.log(i)
+        }
+    })
+    obj2[2] = 100
+
+    // 测试includes
+    const o = {}
+    const obj3 = reactive([o])
+    console.log(obj3.includes(o))
+    console.log(obj3.includes(obj3[0]))
+
+    // 测试push (问题：防止栈溢出)
+    const arr = reactive([])
+    effect(() => arr.push(1))
+    effect(() => arr.push(2))
 }
 
 // 测试深浅响应 与 只读
@@ -515,5 +592,3 @@ function test_basic() {
         obj.text = "hello again!"
     }, 1000)
 }
-
-test()
