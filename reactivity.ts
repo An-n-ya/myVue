@@ -1,3 +1,4 @@
+export {ref, effect}
 interface EffectFunction {
     (): any
     deps: DepsSet[]
@@ -6,7 +7,7 @@ interface EffectFunction {
 type Fn = () => any
 type DepsSet = Set<EffectFunction>
 type DepsMap = Map<string | symbol, DepsSet>
-type SchedulerFunction = (EffectFunction) => any
+type SchedulerFunction = (fn: EffectFunction) => any
 type WatchCallBackFunction = (newValue?: any, oldValue?: any) => any
 type EffectOptions = {
     scheduler?: SchedulerFunction
@@ -16,7 +17,8 @@ type SetType = "SET" | "ADD" | "DELETE"
 
 const ITERATE_KEY = Symbol()
 
-function getType(obj) {
+function getType(obj: any) {
+    // @ts-ignore
     const type = Object.prototype.toString.call(obj).match(/^\[object (.*)\]$/)[1].toLowerCase();
     if(type === 'string' && typeof obj === 'object') return 'object'; // Let "new String('')" return 'object'
     if (obj === null) return 'null'; // PhantomJS has type "DOMWindow" for null
@@ -113,7 +115,7 @@ function trigger(target: object, key: string | symbol, type: SetType) {
 
 // 第二个参数代表是否浅响应
 // 第三个参数代表是否只读（如果只读，就不会建立响应了）
-function createReactive(obj, isShallow = false, isReadOnly = false) {
+function createReactive(obj: any, isShallow = false, isReadOnly = false) {
     return new Proxy(obj, {
         get(target: any, p: string | symbol, receiver: any): any {
             // target的__raw是框架使用的属性，用来返回原始数据
@@ -148,10 +150,10 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
             }
 
             if (typeof res === "object" && res !== null) {
-                if (res.__v_isRef) {
-                    // 如果是ref对象，脱钩ref
-                    return res.value
-                }
+                // if (res.__v_isRef) {
+                //     // 如果是ref对象，脱钩ref
+                //     return res.value
+                // }
                 // 如果res是对象，就继续调用reactive，使得对象的深层结构也响应
                 // 如果数据只读，对象的所有属性也是只读
                 return isReadOnly ? readonly(res) : reactive(res)
@@ -173,14 +175,14 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
                 // 再根据对应的标准判断是添加还是修改
                 ? Number(p) < target.length ? "SET" : "ADD"
                 : Object.prototype.hasOwnProperty.call(target, p) ? "SET" : "ADD"
-            if (target.__v_isRef) {
-                // 如果是ref对象
-                // 先取出来
-                const vv = target[p]
-                // 再赋值
-                vv.value = value
-                return true
-            }
+            // if (target.__v_isRef) {
+            //     // 如果是ref对象
+            //     // 先取出来
+            //     const vv = target[p]
+            //     // 再赋值
+            //     vv.value = value
+            //     return true
+            // }
             // Reflect代替直接赋值
             const res = Reflect.set(target, p, value, receiver)
 
@@ -229,7 +231,7 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
 
 // 建立原始值和代理对象之间的map
 const reactiveMap = new Map()
-function reactive(obj) {
+function reactive(obj: any) {
     // 如果reactiveMap里已经有了，就直接返回
     const existProxy = reactiveMap.get(obj)
     if (existProxy) return existProxy
@@ -242,15 +244,15 @@ function reactive(obj) {
     return proxy
 }
 
-function shallowReactive(obj) {
+function shallowReactive(obj: any) {
     return createReactive(obj, true)
 }
 
-function readonly(obj) {
+function readonly(obj: any) {
     return createReactive(obj, false, true)
 }
 
-function shallowReadonly(obj) {
+function shallowReadonly(obj: any) {
     return createReactive(obj, true, true)
 }
 
@@ -266,14 +268,14 @@ function cleanup(effectFn: EffectFunction) {
 // 实现watch
 function watch(source: any, cb: WatchCallBackFunction) {
     // 用来支持为函数的source
-    let getter
+    let getter: Fn
     if (typeof source == 'function') {
         getter = source
     } else {
         getter = () => traverse(source)
     }
     // 定义旧值和新值
-    let oldValue, newValue
+    let oldValue: any, newValue: any
     const effectFn = effect(
         // 调用traverse函数递归读取source
         () => getter(),
@@ -293,7 +295,7 @@ function watch(source: any, cb: WatchCallBackFunction) {
     oldValue = effectFn()
 }
 
-function traverse(value, seen = new Set()) {
+function traverse(value: any, seen = new Set()) {
     // *终止条件* 如果要读取的数据不是对象，或者已经被读取了
     if (typeof value != 'object' || value === null || seen.has(value)) return
     // 将数据加入seen
@@ -308,7 +310,7 @@ function traverse(value, seen = new Set()) {
 // 实现computed  计算属性
 function computed(getter: Fn) {
     // value 用来缓存上一次计算的值
-    let value
+    let value: any
     // 用来标识是否需要重新计算
     let dirty = true
     // 把 getter 作为副作用函数，创建一个lazy的effect
@@ -336,7 +338,7 @@ function computed(getter: Fn) {
 
 
 function effect(fn: Fn, options: EffectOptions = {}) {
-    const effectFn = () => {
+    const effectFn: EffectFunction = () => {
         // 当effectFn执行时， 将其设置为activeEffect
         cleanup(effectFn)
         activeEffect = effectFn
@@ -363,16 +365,17 @@ function effect(fn: Fn, options: EffectOptions = {}) {
     return effectFn
 }
 
-function toRefs(obj) {
-    const ret = []
+function toRefs(obj: any) {
+    const ret: any[] = []
 
     for (const key in obj) {
+        // @ts-ignore
         ret[key] = toRef(obj, key)
     }
     return ret
 }
 
-function toRef(obj, key) {
+function toRef(obj:any, key:any) {
     const wrapper = {
         get value() {
             return obj[key]
@@ -386,7 +389,7 @@ function toRef(obj, key) {
     return wrapper
 }
 
-function proxyRefs(target) {
+function proxyRefs(target: any) {
     return new Proxy(target, {
         get(target, key, receiver) {
             const value = Reflect.get(target, key, receiver)
@@ -406,7 +409,7 @@ function proxyRefs(target) {
     })
 }
 
-function ref(val) {
+function ref(val: any) {
     // 把原始值包裹
     // 然后再进行代理
     const wrapper = {value: val}
@@ -419,13 +422,16 @@ function ref(val) {
 
 // 重写array的方法
 const arrayInstrumentations = {
+        __raw: undefined,
     includes: function () {
     }
 }
 
 ;["includes", "indexOf", "lastIndexOf"].forEach(method => {
     // 获取原始方法
+    // @ts-ignore
     const originMethod = Array.prototype[method]
+    // @ts-ignore
     arrayInstrumentations[method] = function(...args) {
         // 先获取原始方法的返回值
         let res = originMethod.apply(this, args)
@@ -442,7 +448,9 @@ const arrayInstrumentations = {
 let shouldTrack = true
 ;["push", "pop", "shift", "unshift", "splice"].forEach((method) => {
     // 获取原始方法
+    // @ts-ignore
     const originMethod = Array.prototype[method]
+    // @ts-ignore
     arrayInstrumentations[method] = function (...args) {
         // 在调用原始方法前，先禁止跟踪
         shouldTrack = false
@@ -469,7 +477,7 @@ const obj = reactive(data)
     // test_reactive()
     // test_array()
     // test_map()
-    test_ref()
+    // test_ref()
     // test_reactive_lost()
 })()
 
@@ -486,20 +494,20 @@ function test_reactive_lost() {
 // 测试原始值的响应
 function test_ref() {
     const refV = ref(1)
-    //
-    // effect(() => {
-    //     console.log(refV.value)
-    // })
 
-    // refV.value = 2
-
-    const obj = reactive({refV})
     effect(() => {
-        // reactive的脱钩
-        console.log(obj.refV)
+        console.log(refV.value)
     })
 
-    obj.refV = 2
+    refV.value = 2
+
+    // const obj = reactive({refV})
+    // effect(() => {
+    //     // reactive的脱钩
+    //     console.log(obj.refV)
+    // })
+    //
+    // obj.refV = 2
 }
 
 
@@ -695,6 +703,7 @@ function test_branch() {
         () => {
             console.log("你应该只看到我两次！")
             let node = document.querySelector("#app")
+            // @ts-ignore
             node.textContent = obj.ok ? obj.text : 'not'
         }
     )
@@ -711,6 +720,7 @@ function test_basic() {
     effect(
         () => {
             let node = document.querySelector("#app")
+            // @ts-ignore
             node.textContent = "hello world!"
         }
     )
