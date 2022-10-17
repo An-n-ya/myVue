@@ -1,4 +1,19 @@
 export { ref, effect };
+// interface EffectFunction {
+//     (): any
+//     deps: DepsSet[]
+//     options: EffectOptions
+// }
+// type Fn = () => any
+// type DepsSet = Set<EffectFunction>
+// type DepsMap = Map<string | symbol, DepsSet>
+// type SchedulerFunction = (fn: EffectFunction) => any
+// type WatchCallBackFunction = (newValue?: any, oldValue?: any) => any
+// type EffectOptions = {
+//     scheduler?: SchedulerFunction
+//     lazy?: boolean
+// }
+// type SetType = "SET" | "ADD" | "DELETE"
 const ITERATE_KEY = Symbol();
 function getType(obj) {
     // @ts-ignore
@@ -114,7 +129,6 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
             // 返回p索引的值
             // 使用Reflect.get把receiver传递进去，使target里的this指向代理对象，从而方便建立响应
             const res = Reflect.get(target, p, receiver);
-            console.log(target, p, receiver, res);
             if (isShallow) {
                 // 如果是浅响应，直接返回
                 return res;
@@ -123,7 +137,6 @@ function createReactive(obj, isShallow = false, isReadOnly = false) {
                 // 只对非只读和非symbol的属性跟踪
                 track(target, p);
             }
-            console.log(res);
             if (typeof res === "object" && res !== null) {
                 // if (res.__v_isRef) {
                 //     // 如果是ref对象，脱钩ref
