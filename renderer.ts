@@ -42,7 +42,8 @@ function createRenderer(options: CreateRendererOptions) {
         createElement,
         insert,
         setElementText,
-        patchProps
+        patchProps,
+        unmount
     } = options
     function patch(n1: vnode | undefined | null, n2: vnode, container: HTMLElement) {
         if (!n1) {
@@ -55,7 +56,8 @@ function createRenderer(options: CreateRendererOptions) {
 
     function mountElement(vnode: vnode, container: HTMLElement) {
         // 创建 DOM 元素
-        const el = createElement(vnode.type)
+        // 把真实 dom 元素和 vnode 关联起来
+        const el = vnode.el = createElement(vnode.type)
         if (typeof vnode.children === "string") {
             // 如果 vnode 的子节点是字符串，代表元素只有文本节点
             // 直接设置textContent就好
@@ -77,7 +79,7 @@ function createRenderer(options: CreateRendererOptions) {
         insert(el, container)
     }
 
-    function render(vnode: vnode, container: HTMLElement | null) {
+    function render(vnode: vnode | null | undefined, container: HTMLElement | null) {
         if(!container) {
             // 如果container不存在，直接返回
             return
@@ -90,7 +92,7 @@ function createRenderer(options: CreateRendererOptions) {
             // 如果vnode不存在，说明是卸载操作
             // 如果老vnode存在，就让内部html清空
             if (container._vnode) {
-                container.innerHTML = ""
+                unmount(container._vnode)
             }
         }
         // 把当前vnode赋值给_vnode, 作为老vnode
@@ -129,6 +131,15 @@ const renderer = createRenderer({
             el.setAttribute(key, nextValue)
         }
 
+    },
+    unmount(vnode: vnode) {
+        // 将unmount独立出来
+        // 这里将来可以添加相关的生命周期函数
+        if(!vnode.el) return
+        const parent = vnode.el.parentNode
+        if (parent) {
+            parent.removeChild(vnode.el)
+        }
     }
 })
 
@@ -149,7 +160,7 @@ function propsTest() {
     helpTest(vnode)
 }
 
-function helpTest(vnode: vnode, id = "app") {
+function helpTest(vnode: vnode | null, id = "app") {
     effect(() => {
         renderer(vnode, document.getElementById(id))
     })
@@ -187,9 +198,20 @@ function classTest() {
     helpTest(vnode3, "app3")
 }
 
+function unmountTest() {
+    const vnode1 = {
+        type: "p",
+        children: "你应该看不到我才对"
+    }
+
+    helpTest(vnode1)
+    helpTest(null)
+}
+
 ;(function test() {
     // propsTest()
-    classTest()
+    // classTest()
+    unmountTest()
 })()
 
 

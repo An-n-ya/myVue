@@ -35,7 +35,7 @@ function normalizeClass(input) {
 function createRenderer(options) {
     // 通过options得到控制 node 的操作
     // 用以跨平台
-    const { createElement, insert, setElementText, patchProps } = options;
+    const { createElement, insert, setElementText, patchProps, unmount } = options;
     function patch(n1, n2, container) {
         if (!n1) {
             // 如果n1 不存在，意味着挂载
@@ -47,7 +47,8 @@ function createRenderer(options) {
     }
     function mountElement(vnode, container) {
         // 创建 DOM 元素
-        const el = createElement(vnode.type);
+        // 把真实 dom 元素和 vnode 关联起来
+        const el = vnode.el = createElement(vnode.type);
         if (typeof vnode.children === "string") {
             // 如果 vnode 的子节点是字符串，代表元素只有文本节点
             // 直接设置textContent就好
@@ -83,7 +84,7 @@ function createRenderer(options) {
             // 如果vnode不存在，说明是卸载操作
             // 如果老vnode存在，就让内部html清空
             if (container._vnode) {
-                container.innerHTML = "";
+                unmount(container._vnode);
             }
         }
         // 把当前vnode赋值给_vnode, 作为老vnode
@@ -121,6 +122,16 @@ const renderer = createRenderer({
             // 如果没有对应的 DOM Properties（比如class -- className）
             // 使用setAttribute设置
             el.setAttribute(key, nextValue);
+        }
+    },
+    unmount(vnode) {
+        // 将unmount独立出来
+        // 这里将来可以添加相关的生命周期函数
+        if (!vnode.el)
+            return;
+        const parent = vnode.el.parentNode;
+        if (parent) {
+            parent.removeChild(vnode.el);
         }
     }
 });
@@ -172,10 +183,19 @@ function classTest() {
     helpTest(vnode2, "app2");
     helpTest(vnode3, "app3");
 }
+function unmountTest() {
+    const vnode1 = {
+        type: "p",
+        children: "你应该看不到我才对"
+    };
+    helpTest(vnode1);
+    helpTest(null);
+}
 ;
 (function test() {
     // propsTest()
-    classTest();
+    // classTest()
+    unmountTest();
 })();
 const count = ref(1);
 count.value = 2;
