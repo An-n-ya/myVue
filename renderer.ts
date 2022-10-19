@@ -8,7 +8,7 @@ function createRenderer(options: CreateRendererOptions) {
         insert,
         setElementText
     } = options
-    function patch(n1: vnode | undefined, n2: vnode, container: HTMLElement) {
+    function patch(n1: vnode | undefined | null, n2: vnode, container: HTMLElement) {
         if (!n1) {
             // 如果n1 不存在，意味着挂载
             mountElement(n2, container)
@@ -25,6 +25,11 @@ function createRenderer(options: CreateRendererOptions) {
             // 直接设置textContent就好
             // el.textContent = vnode.children
             setElementText(el, vnode.children)
+        } else if (Array.isArray(vnode.children)) {
+            // 递归处理每个子元素
+            vnode.children.forEach(child => {
+                patch(null, child, el)
+            })
         }
         // 在容器中添加元素
         insert(el, container)
@@ -68,8 +73,13 @@ const renderer = createRenderer({
 const count = ref(1)
 
 const vnode = {
-    type: "h1",
-    children: String(count.value)
+    type: "div",
+    children: [
+        {
+            type: "p",
+            children: "hello"
+        }
+    ]
 }
 
 effect(() => {

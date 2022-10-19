@@ -4,7 +4,7 @@ interface HTMLElement {
 
 interface vnode {
     type: string,
-    children: string | vnode
+    children: any
 }
 
 interface CreateRendererOptions {

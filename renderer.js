@@ -1,5 +1,8 @@
 import { ref, effect } from "./reactivity.js";
-function createRenderer() {
+function createRenderer(options) {
+    // 通过options得到控制 node 的操作
+    // 用以跨平台
+    const { createElement, insert, setElementText } = options;
     function patch(n1, n2, container) {
         if (!n1) {
             // 如果n1 不存在，意味着挂载
@@ -11,14 +14,21 @@ function createRenderer() {
     }
     function mountElement(vnode, container) {
         // 创建 DOM 元素
-        const el = document.createElement(vnode.type);
+        const el = createElement(vnode.type);
         if (typeof vnode.children === "string") {
             // 如果 vnode 的子节点是字符串，代表元素只有文本节点
             // 直接设置textContent就好
-            el.textContent = vnode.children;
+            // el.textContent = vnode.children
+            setElementText(el, vnode.children);
+        }
+        else if (Array.isArray(vnode.children)) {
+            // 递归处理每个子元素
+            vnode.children.forEach(child => {
+                patch(null, child, el);
+            });
         }
         // 在容器中添加元素
-        container.appendChild(el);
+        insert(el, container);
     }
     function render(vnode, container) {
         if (!container) {
@@ -42,11 +52,26 @@ function createRenderer() {
     }
     return render;
 }
-const renderer = createRenderer();
+const renderer = createRenderer({
+    createElement(tag) {
+        return document.createElement(tag);
+    },
+    setElementText(el, text) {
+        el.textContent = text;
+    },
+    insert(el, parent, anchor = null) {
+        parent.insertBefore(el, anchor);
+    }
+});
 const count = ref(1);
 const vnode = {
-    type: "h1",
-    children: String(count.value)
+    type: "div",
+    children: [
+        {
+            type: "p",
+            children: "hello"
+        }
+    ]
 };
 effect(() => {
     renderer(vnode, document.getElementById("app"));
