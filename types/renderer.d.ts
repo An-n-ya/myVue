@@ -4,9 +4,9 @@ interface HTMLElement extends Record<string, any>{
 
 interface vnode {
     type: string,
-    children: any,
+    children?: any,
     // 使用Record限制对象的键名
-    props: Record<string, string>
+    props: Record<string, any>
 }
 
 interface CreateRendererOptions {

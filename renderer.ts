@@ -10,6 +10,31 @@ function shouldSetAsProps(el: HTMLElement, key: string, value: any) {
     return key in el
 }
 
+function normalizeClass(input: any) {
+    let ret = []
+    if (Array.isArray(input)) {
+        for (const ele of input) {
+            console.log(ele)
+            if (typeof ele === 'string') {
+                ret.push(ele)
+            } else if (typeof ele === 'object') {
+                for (const key in ele) {
+                    if (ele[key]) {
+                        ret.push(key)
+                    }
+                }
+            }
+        }
+    } else if (typeof input === 'object') {
+        for (const key in input) {
+            if (input[key]) {
+                ret.push(key)
+            }
+        }
+    }
+    return ret.join(" ")
+}
+
 function createRenderer(options: CreateRendererOptions) {
     // 通过options得到控制 node 的操作
     // 用以跨平台
@@ -87,7 +112,9 @@ const renderer = createRenderer({
     },
     patchProps(el: HTMLElement, key: string, prevValue: any, nextValue: any) {
         // 用 shouldSetAsProps 帮助函数确认 key 是否存在于对应的DOM Properties
-        if (shouldSetAsProps(el, key, nextValue)) {
+        if (key === "class") {
+            el.className = nextValue || ''
+        }else if (shouldSetAsProps(el, key, nextValue)) {
             const type = typeof el[key]
             // 如果类型是布尔 并且 值是空字符串，则设置为true
             if (type === "boolean" && nextValue === "") {
@@ -105,24 +132,67 @@ const renderer = createRenderer({
     }
 })
 
-const count = ref(1)
 
-const vnode = {
-    type: "div",
-    props: {
-        id: 'foo'
-    },
-    children: [
-        {
-            type: "p",
-            children: "hello"
-        }
-    ]
+function propsTest() {
+    const vnode = {
+        type: "div",
+        props: {
+            id: 'foo'
+        },
+        children: [
+            {
+                type: "p",
+                children: "hello"
+            }
+        ]
+    }
+    helpTest(vnode)
 }
 
-effect(() => {
-    renderer(vnode, document.getElementById("app"))
-})
+function helpTest(vnode: vnode, id = "app") {
+    effect(() => {
+        renderer(vnode, document.getElementById(id))
+    })
+}
 
+function classTest() {
+    const vnode1 = {
+        type: "p",
+        props: {
+            class: "foo bar"
+        },
+    }
+
+    const cls = {tee: true, pee: false}
+    const vnode2 = {
+        type: "p",
+        props: {
+            class: normalizeClass(cls)
+        }
+    }
+
+    const arr = [
+        "gee yuu",
+        { sww: true }
+    ]
+    const vnode3 = {
+        type: "p",
+        props: {
+            class: normalizeClass(arr)
+        }
+    }
+
+    helpTest(vnode1)
+    helpTest(vnode2, "app2")
+    helpTest(vnode3, "app3")
+}
+
+;(function test() {
+    // propsTest()
+    classTest()
+})()
+
+
+const count = ref(1)
 count.value = 2
 
