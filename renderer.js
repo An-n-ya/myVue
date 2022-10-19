@@ -1,8 +1,15 @@
 import { ref, effect } from "./reactivity.js";
+function shouldSetAsProps(el, key, value) {
+    // 对一些属性做特殊处理
+    // input 的 form 属性是只读的
+    if (key === "form" && el.tagName === "INPUT")
+        return false;
+    return key in el;
+}
 function createRenderer(options) {
     // 通过options得到控制 node 的操作
     // 用以跨平台
-    const { createElement, insert, setElementText } = options;
+    const { createElement, insert, setElementText, patchProps } = options;
     function patch(n1, n2, container) {
         if (!n1) {
             // 如果n1 不存在，意味着挂载
@@ -26,6 +33,12 @@ function createRenderer(options) {
             vnode.children.forEach(child => {
                 patch(null, child, el);
             });
+        }
+        // 处理props
+        if (vnode.props) {
+            for (const key in vnode.props) {
+                patchProps(el, key, null, vnode.props[key]);
+            }
         }
         // 在容器中添加元素
         insert(el, container);
@@ -61,11 +74,33 @@ const renderer = createRenderer({
     },
     insert(el, parent, anchor = null) {
         parent.insertBefore(el, anchor);
+    },
+    patchProps(el, key, prevValue, nextValue) {
+        // 用 shouldSetAsProps 帮助函数确认 key 是否存在于对应的DOM Properties
+        if (shouldSetAsProps(el, key, nextValue)) {
+            const type = typeof el[key];
+            // 如果类型是布尔 并且 值是空字符串，则设置为true
+            if (type === "boolean" && nextValue === "") {
+                el[key] = true;
+            }
+            else {
+                // 否则直接把value赋值给el对应的属性
+                el[key] = nextValue;
+            }
+        }
+        else {
+            // 如果没有对应的 DOM Properties（比如class -- className）
+            // 使用setAttribute设置
+            el.setAttribute(key, nextValue);
+        }
     }
 });
 const count = ref(1);
 const vnode = {
     type: "div",
+    props: {
+        id: 'foo'
+    },
     children: [
         {
             type: "p",

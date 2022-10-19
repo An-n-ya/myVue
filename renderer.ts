@@ -1,12 +1,23 @@
 import {ref, effect} from "./reactivity.js"
 
+
+function shouldSetAsProps(el: HTMLElement, key: string, value: any) {
+    // 对一些属性做特殊处理
+
+    // input 的 form 属性是只读的
+    if (key === "form" && el.tagName === "INPUT") return false
+
+    return key in el
+}
+
 function createRenderer(options: CreateRendererOptions) {
     // 通过options得到控制 node 的操作
     // 用以跨平台
     const {
         createElement,
         insert,
-        setElementText
+        setElementText,
+        patchProps
     } = options
     function patch(n1: vnode | undefined | null, n2: vnode, container: HTMLElement) {
         if (!n1) {
@@ -30,6 +41,12 @@ function createRenderer(options: CreateRendererOptions) {
             vnode.children.forEach(child => {
                 patch(null, child, el)
             })
+        }
+        // 处理props
+        if (vnode.props) {
+            for(const key in vnode.props) {
+                patchProps(el, key, null, vnode.props[key])
+            }
         }
         // 在容器中添加元素
         insert(el, container)
@@ -67,6 +84,24 @@ const renderer = createRenderer({
     },
     insert(el: HTMLElement, parent: HTMLElement, anchor: Node | null = null) {
         parent.insertBefore(el, anchor)
+    },
+    patchProps(el: HTMLElement, key: string, prevValue: any, nextValue: any) {
+        // 用 shouldSetAsProps 帮助函数确认 key 是否存在于对应的DOM Properties
+        if (shouldSetAsProps(el, key, nextValue)) {
+            const type = typeof el[key]
+            // 如果类型是布尔 并且 值是空字符串，则设置为true
+            if (type === "boolean" && nextValue === "") {
+                el[key] = true
+            } else {
+                // 否则直接把value赋值给el对应的属性
+                el[key] = nextValue
+            }
+        } else {
+            // 如果没有对应的 DOM Properties（比如class -- className）
+            // 使用setAttribute设置
+            el.setAttribute(key, nextValue)
+        }
+
     }
 })
 
@@ -74,6 +109,9 @@ const count = ref(1)
 
 const vnode = {
     type: "div",
+    props: {
+        id: 'foo'
+    },
     children: [
         {
             type: "p",
