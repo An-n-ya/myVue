@@ -125,8 +125,17 @@ const renderer = createRenderer({
         parent.insertBefore(el, anchor)
     },
     patchProps(el: HTMLElement, key: string, prevValue: any, nextValue: any) {
+        if (/^on/.test(key)) {
+            // 如果是以on开头的，就说明是事件绑定
+            const name = key.slice(2).toLowerCase()
+            // 溢出上一次绑定的时间处理函数
+            // TODO: 使用removeEventListener效率低下 考虑使用invoker包装事件
+            prevValue && el.removeEventListener(name, prevValue)
+            // 绑定事件
+            el.addEventListener(name, nextValue)
+        }
         // 用 shouldSetAsProps 帮助函数确认 key 是否存在于对应的DOM Properties
-        if (key === "class") {
+        else if (key === "class") {
             el.className = nextValue || ''
         }else if (shouldSetAsProps(el, key, nextValue)) {
             const type = typeof el[key]
