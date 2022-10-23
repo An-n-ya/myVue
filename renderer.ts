@@ -45,12 +45,24 @@ function createRenderer(options: CreateRendererOptions) {
         patchProps,
         unmount
     } = options
+
     function patch(n1: vnode | undefined | null, n2: vnode, container: HTMLElement) {
         if (!n1) {
             // 如果n1 不存在，意味着挂载
             mountElement(n2, container)
-        } else {
-            // 如果n1不存在，意味着打补丁
+        } else if (n1 && n1.type !== n2.type) {
+            // 如果n1存在， 并且n1的类型和n2的类型不一致，则直接卸载n1
+            unmount(n1)
+            n1 = null
+        } else if (n1 && n1.type === n2.type) {
+            // 如果n1存在， 并且n1的类型和n2的类型一致，则需要根据n2的type打补丁
+            const {type} = n2
+            if (typeof type === "string") {
+                // TODO: patchElement(n1, n2)
+            } else if (typeof type === 'object') {
+                // 如果n2.type是对象，则描述的是组件
+            }
+
         }
     }
 
