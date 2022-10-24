@@ -128,11 +128,30 @@ const renderer = createRenderer({
         if (/^on/.test(key)) {
             // 如果是以on开头的，就说明是事件绑定
             const name = key.slice(2).toLowerCase()
-            // 溢出上一次绑定的时间处理函数
-            // TODO: 使用removeEventListener效率低下 考虑使用invoker包装事件
+            // 获取之前的事件处理函数
+            let invoker = el._vei
+            if (nextValue) {
+                if (!invoker) {
+                    // 如果之前没有invoker，就直接赋值
+                    invoker = el._vei = (e: EventTarget) => {
+                        invoker.value(e)
+                    }
+                    // 将真正的事件处理函数赋值给invoker的value
+                    invoker.value = nextValue
+                    // 绑定事件
+                    el.addEventListener(name, nextValue)
+                } else {
+                    // 移出上一次绑定的时间处理函数
+                    // DONE: 使用removeEventListener效率低下 考虑使用invoker包装事件
+                    // 如果存在，就意味着更新，直接改invoker的value属性即可，不需要调用dom方法
+                    // 性能更好
+                    invoker.value = nextValue
+                }
+            } else if (invoker) {
+                // 如果nextValue也没有了，说明是注销事件处理函数
+                el.removeEventListener(name, invoker.value)
+            }
             prevValue && el.removeEventListener(name, prevValue)
-            // 绑定事件
-            el.addEventListener(name, nextValue)
         }
         // 用 shouldSetAsProps 帮助函数确认 key 是否存在于对应的DOM Properties
         else if (key === "class") {
@@ -229,10 +248,24 @@ function unmountTest() {
     helpTest(null)
 }
 
+function eventTest() {
+    const vnode = {
+        type: "button",
+        props: {
+            onClick: () => {
+                alert("world!")
+            }
+        },
+        children: "hello"
+    }
+    helpTest(vnode)
+}
+
 ;(function test() {
     // propsTest()
     // classTest()
-    unmountTest()
+    // unmountTest()
+    eventTest()
 })()
 
 

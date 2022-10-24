@@ -41,8 +41,20 @@ function createRenderer(options) {
             // 如果n1 不存在，意味着挂载
             mountElement(n2, container);
         }
-        else {
-            // 如果n1不存在，意味着打补丁
+        else if (n1 && n1.type !== n2.type) {
+            // 如果n1存在， 并且n1的类型和n2的类型不一致，则直接卸载n1
+            unmount(n1);
+            n1 = null;
+        }
+        else if (n1 && n1.type === n2.type) {
+            // 如果n1存在， 并且n1的类型和n2的类型一致，则需要根据n2的type打补丁
+            const { type } = n2;
+            if (typeof type === "string") {
+                // TODO: patchElement(n1, n2)
+            }
+            else if (typeof type === 'object') {
+                // 如果n2.type是对象，则描述的是组件
+            }
         }
     }
     function mountElement(vnode, container) {
@@ -103,8 +115,38 @@ const renderer = createRenderer({
         parent.insertBefore(el, anchor);
     },
     patchProps(el, key, prevValue, nextValue) {
+        if (/^on/.test(key)) {
+            // 如果是以on开头的，就说明是事件绑定
+            const name = key.slice(2).toLowerCase();
+            // 获取之前的事件处理函数
+            let invoker = el._vei;
+            if (nextValue) {
+                if (!invoker) {
+                    // 如果之前没有invoker，就直接赋值
+                    invoker = el._vei = (e) => {
+                        invoker.value(e);
+                    };
+                    // 将真正的事件处理函数赋值给invoker的value
+                    invoker.value = nextValue;
+                    // 绑定事件
+                    el.addEventListener(name, nextValue);
+                }
+                else {
+                    // 移出上一次绑定的时间处理函数
+                    // DONE: 使用removeEventListener效率低下 考虑使用invoker包装事件
+                    // 如果存在，就意味着更新，直接改invoker的value属性即可，不需要调用dom方法
+                    // 性能更好
+                    invoker.value = nextValue;
+                }
+            }
+            else if (invoker) {
+                // 如果nextValue也没有了，说明是注销事件处理函数
+                el.removeEventListener(name, invoker.value);
+            }
+            prevValue && el.removeEventListener(name, prevValue);
+        }
         // 用 shouldSetAsProps 帮助函数确认 key 是否存在于对应的DOM Properties
-        if (key === "class") {
+        else if (key === "class") {
             el.className = nextValue || '';
         }
         else if (shouldSetAsProps(el, key, nextValue)) {
@@ -191,11 +233,24 @@ function unmountTest() {
     helpTest(vnode1);
     helpTest(null);
 }
+function eventTest() {
+    const vnode = {
+        type: "button",
+        props: {
+            onClick: () => {
+                alert("world!");
+            }
+        },
+        children: "hello"
+    };
+    helpTest(vnode);
+}
 ;
 (function test() {
     // propsTest()
     // classTest()
-    unmountTest();
+    // unmountTest()
+    eventTest();
 })();
 const count = ref(1);
 count.value = 2;
