@@ -58,11 +58,73 @@ function createRenderer(options: CreateRendererOptions) {
             // 如果n1存在， 并且n1的类型和n2的类型一致，则需要根据n2的type打补丁
             const {type} = n2
             if (typeof type === "string") {
-                // TODO: patchElement(n1, n2)
+                // DONE: patchElement(n1, n2)
+                patchElement(n1, n2)
             } else if (typeof type === 'object') {
                 // 如果n2.type是对象，则描述的是组件
             }
 
+        }
+    }
+
+    function patchElement(n1: vnode, n2: vnode) {
+        const el = n1.el = n2.el
+        const oldProps = n1.props || {}
+        const newProps = n2.props || {}
+
+        // 先更新 props
+        for (const key in newProps) {
+            if (newProps[key] !== oldProps[key]) {
+                patchProps(el, key, oldProps[key], newProps[key])
+            }
+        }
+        for (const key in oldProps) {
+            if (!(key in newProps)) {
+                patchProps(el, key, oldProps[key], null)
+            }
+        }
+        if (el) {
+            // 再更新 children
+            patchChildren(n1, n2, el)
+        }
+    }
+
+    function patchChildren(n1: vnode, n2: vnode, container: HTMLElement) {
+        // 先判断新节点是字符串的情况
+        if (typeof n2.children === "string") {
+            // 旧节点有三种可能: null 文本子节点 组子节点
+            // 只有在旧节点是一组子节点的时候，需要逐个卸载，其他情况什么都不用做
+            if (Array.isArray(n1.children)) {
+                n1.children.forEach((c) => unmount(c))
+            }
+            // 最后将新节点(string)设置给容器
+            setElementText(container, n2.children)
+        } else if (Array.isArray(n2.children)) {
+            // 如果新节点是一组节点
+            if (Array.isArray(n1.children)) {
+                // 如果旧节点也是一组节点，需要用到diff算法
+                // TODO: diff算法
+
+                // 最原始的想法是，先全部卸载旧节点，再全部挂载新节点
+                n1.children.forEach((c) => unmount(c))
+                n2.children.forEach(c => patch(null, c, container))
+
+            } else {
+                // 旧子节点要么是string要么为空
+                // 无论那种情况只需要清空容器，再逐个挂载即可
+                setElementText(container, "")
+                n2.children.forEach(c => patch(null, c, container))
+            }
+        } else {
+            // 运行到这里，说明新节点不存在
+            if (Array.isArray(n1.children)) {
+                // 逐个卸载旧子节点
+                n1.children.forEach((c) => unmount(c))
+            } else if (typeof n1.children === "string") {
+                // 旧节点为字符，清空字符即可
+                setElementText(container, "")
+            }
+            // 旧节点也没有子节点，啥都不做
         }
     }
 
@@ -128,18 +190,25 @@ const renderer = createRenderer({
         if (/^on/.test(key)) {
             // 如果是以on开头的，就说明是事件绑定
             const name = key.slice(2).toLowerCase()
-            // 获取之前的事件处理函数
-            let invoker = el._vei
+            // 获取之前的事件处理函数集合
+            let invokers = el._vei || (el._vei = {})
+            // 获取key对应的处理函数
+            let invoker = invokers[key]
             if (nextValue) {
                 if (!invoker) {
                     // 如果之前没有invoker，就直接赋值
-                    invoker = el._vei = (e: EventTarget) => {
-                        invoker.value(e)
+                    invoker = el._vei[key] = (e: EventTarget) => {
+                        if (Array.isArray(invoker.value)) {
+                            // @ts-ignore
+                            invoker.value.forEach(fn => fn(e))
+                        } else {
+                            invoker.value(e)
+                        }
                     }
                     // 将真正的事件处理函数赋值给invoker的value
                     invoker.value = nextValue
                     // 绑定事件
-                    el.addEventListener(name, nextValue)
+                    el.addEventListener(name, invoker)
                 } else {
                     // 移出上一次绑定的时间处理函数
                     // DONE: 使用removeEventListener效率低下 考虑使用invoker包装事件
@@ -149,7 +218,7 @@ const renderer = createRenderer({
                 }
             } else if (invoker) {
                 // 如果nextValue也没有了，说明是注销事件处理函数
-                el.removeEventListener(name, invoker.value)
+                el.removeEventListener(name, invoker)
             }
             prevValue && el.removeEventListener(name, prevValue)
         }
@@ -252,20 +321,39 @@ function eventTest() {
     const vnode = {
         type: "button",
         props: {
-            onClick: () => {
-                alert("world!")
-            }
+            onClick: [
+                () => {
+                    alert("world!")
+                },
+                () => {
+                    alert("hello again!")
+                }
+            ]
         },
         children: "hello"
     }
     helpTest(vnode)
 }
 
+function baseTest() {
+    const count = ref(1)
+    console.log(count.value)
+    effect(() => {
+        const vnode = {
+            type: "p",
+            children: `${count.value}`
+        }
+        helpTest(vnode)
+    })
+    count.value++
+}
+
 ;(function test() {
+    baseTest()
     // propsTest()
     // classTest()
     // unmountTest()
-    eventTest()
+    // eventTest()
 })()
 
 

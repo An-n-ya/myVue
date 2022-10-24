@@ -118,18 +118,26 @@ const renderer = createRenderer({
         if (/^on/.test(key)) {
             // 如果是以on开头的，就说明是事件绑定
             const name = key.slice(2).toLowerCase();
-            // 获取之前的事件处理函数
-            let invoker = el._vei;
+            // 获取之前的事件处理函数集合
+            let invokers = el._vei || (el._vei = {});
+            // 获取key对应的处理函数
+            let invoker = invokers[key];
             if (nextValue) {
                 if (!invoker) {
                     // 如果之前没有invoker，就直接赋值
-                    invoker = el._vei = (e) => {
-                        invoker.value(e);
+                    invoker = el._vei[key] = (e) => {
+                        if (Array.isArray(invoker.value)) {
+                            // @ts-ignore
+                            invoker.value.forEach(fn => fn(e));
+                        }
+                        else {
+                            invoker.value(e);
+                        }
                     };
                     // 将真正的事件处理函数赋值给invoker的value
                     invoker.value = nextValue;
                     // 绑定事件
-                    el.addEventListener(name, nextValue);
+                    el.addEventListener(name, invoker);
                 }
                 else {
                     // 移出上一次绑定的时间处理函数
@@ -141,7 +149,7 @@ const renderer = createRenderer({
             }
             else if (invoker) {
                 // 如果nextValue也没有了，说明是注销事件处理函数
-                el.removeEventListener(name, invoker.value);
+                el.removeEventListener(name, invoker);
             }
             prevValue && el.removeEventListener(name, prevValue);
         }
@@ -237,20 +245,38 @@ function eventTest() {
     const vnode = {
         type: "button",
         props: {
-            onClick: () => {
-                alert("world!");
-            }
+            onClick: [
+                () => {
+                    alert("world!");
+                },
+                () => {
+                    alert("hello again!");
+                }
+            ]
         },
         children: "hello"
     };
     helpTest(vnode);
 }
+function baseTest() {
+    const count = ref(1);
+    console.log(count.value);
+    effect(() => {
+        const vnode = {
+            type: "p",
+            children: `${count.value}`
+        };
+        helpTest(vnode);
+    });
+    count.value++;
+}
 ;
 (function test() {
+    baseTest();
     // propsTest()
     // classTest()
     // unmountTest()
-    eventTest();
+    // eventTest()
 })();
 const count = ref(1);
 count.value = 2;
