@@ -46,10 +46,10 @@ function createRenderer(options: CreateRendererOptions) {
         unmount
     } = options
 
-    function patch(n1: vnode | undefined | null, n2: vnode, container: HTMLElement) {
+    function patch(n1: vnode | undefined | null, n2: vnode, container: HTMLElement, anchor: Node | null = null) {
         if (!n1) {
             // 如果n1 不存在，意味着挂载
-            mountElement(n2, container)
+            mountElement(n2, container, anchor)
         } else if (n1 && n1.type !== n2.type) {
             // 如果n1存在， 并且n1的类型和n2的类型不一致，则直接卸载n1
             unmount(n1)
@@ -68,7 +68,9 @@ function createRenderer(options: CreateRendererOptions) {
     }
 
     function patchElement(n1: vnode, n2: vnode) {
-        const el = n1.el = n2.el
+        console.log(n1, n2)
+        // n1的el赋值给n2 (这个赋值操作，就是所谓的复用DOM了)
+        const el = n2.el = n1.el
         const oldProps = n1.props || {}
         const newProps = n2.props || {}
 
@@ -89,6 +91,76 @@ function createRenderer(options: CreateRendererOptions) {
         }
     }
 
+    // 暴力diff算法，先卸载全部旧节点，再挂载新节点 (不能复用DOM节点，需要反复卸载与挂载)
+    function bruteDiff(oldChildren: vnode[], newChildren: vnode[], container: HTMLElement) {
+        oldChildren.forEach(c => unmount(c))
+        newChildren.forEach(c => patch(null, c, container))
+    }
+
+    // 最简单的diff算法 复杂度为O(n2)
+    function simpleDiff(oldChildren: vnode[], newChildren: vnode[], container: HTMLElement) {
+        // 维护寻找过程中最大的索引
+        // 如果当前索引小于lastIndex，就说明需要调换位置
+        let lastIndex = 0
+        for (let i = 0; i < newChildren.length; i++) {
+            const newVnode = newChildren[i]
+            // 如果在oldChildren找到了newVnode的key，说明可以复用，find为true，否则为false
+            let find = false
+            for (let j = 0; j < oldChildren.length; j++) {
+                const oldVnode = oldChildren[j]
+                if (newVnode.key === oldVnode.key) {
+                    // 将find值true
+                    find = true
+                    // 如果key相同，即可以复用
+                    patch(oldVnode, newVnode, container)
+                    if (j < lastIndex) {
+                        // 这里进行移动操作
+                        // 先获取前一个vnode
+                        const prevNode = newChildren[i-1]
+                        // 如果prevNode不存在，说明是第一个节点，不需要移动
+                        if (prevNode) {
+                            // 将当前节点移动到上一个节点的后面
+                            const anchor = prevNode.el?.nextSibling
+                            console.log('anchor', anchor)
+                            insert(newVnode.el, container, anchor)
+                        }
+                    } else {
+                        // 如果j比较大, 则更新lastIndex
+                        lastIndex = j
+                    }
+                    break
+                }
+            }
+            if (!find) {
+                // 如果在oldChildren中没有找到，说明当前newVnode是新增的节点
+                const prevVNode = newChildren[i - 1]
+                let anchor = null
+                if (prevVNode) {
+                    // 如果有prevVnode，就用nextSibling作为锚点
+                    anchor = prevVNode.el?.nextSibling == undefined ? null : prevVNode.el?.nextSibling
+                } else {
+                    // 如果没有prevVnode，说明是第一个节点，则使用容器的第一个元素作为锚点
+                    anchor = container.firstChild
+                }
+                patch(null, newVnode, container, anchor)
+            }
+
+        }
+
+        // 进行卸载操作
+        for (let i = 0; i < oldChildren.length; i++) {
+            const oldVnode = oldChildren[i]
+            const has = newChildren.find(
+                vnode => vnode.key === oldVnode.key
+            )
+            if (!has) {
+                // 如果没有找到，就需要删除
+                unmount(oldVnode)
+            }
+        }
+    }
+
+
     function patchChildren(n1: vnode, n2: vnode, container: HTMLElement) {
         // 先判断新节点是字符串的情况
         if (typeof n2.children === "string") {
@@ -103,17 +175,14 @@ function createRenderer(options: CreateRendererOptions) {
             // 如果新节点是一组节点
             if (Array.isArray(n1.children)) {
                 // 如果旧节点也是一组节点，需要用到diff算法
-                // TODO: diff算法
-
-                // 最原始的想法是，先全部卸载旧节点，再全部挂载新节点
-                n1.children.forEach((c) => unmount(c))
-                n2.children.forEach(c => patch(null, c, container))
-
+                // Done: diff算法
+                simpleDiff(n1.children, n2.children, container)
+                // bruteDiff(n1.children, n2.children, container)
             } else {
                 // 旧子节点要么是string要么为空
                 // 无论那种情况只需要清空容器，再逐个挂载即可
                 setElementText(container, "")
-                n2.children.forEach(c => patch(null, c, container))
+                n2.children.forEach(c => patch(null, c, container, null))
             }
         } else {
             // 运行到这里，说明新节点不存在
@@ -128,7 +197,7 @@ function createRenderer(options: CreateRendererOptions) {
         }
     }
 
-    function mountElement(vnode: vnode, container: HTMLElement) {
+    function mountElement(vnode: vnode, container: HTMLElement, anchor: Node | null) {
         // 创建 DOM 元素
         // 把真实 dom 元素和 vnode 关联起来
         const el = vnode.el = createElement(vnode.type)
@@ -140,7 +209,7 @@ function createRenderer(options: CreateRendererOptions) {
         } else if (Array.isArray(vnode.children)) {
             // 递归处理每个子元素
             vnode.children.forEach(child => {
-                patch(null, child, el)
+                patch(null, child, el, anchor)
             })
         }
         // 处理props
@@ -150,7 +219,7 @@ function createRenderer(options: CreateRendererOptions) {
             }
         }
         // 在容器中添加元素
-        insert(el, container)
+        insert(el, container, anchor)
     }
 
     function render(vnode: vnode | null | undefined, container: HTMLElement | null) {
@@ -161,7 +230,7 @@ function createRenderer(options: CreateRendererOptions) {
         // 如果vnode存在
         if (vnode) {
             // 对新老vnode做patch
-            patch(container._vnode, vnode, container)
+            patch(container._vnode, vnode, container, null)
         } else {
             // 如果vnode不存在，说明是卸载操作
             // 如果老vnode存在，就让内部html清空
@@ -176,14 +245,20 @@ function createRenderer(options: CreateRendererOptions) {
     return render
 }
 
+let createCnt = 0 // 记录使用了多少次创建节点的dom操作
+let removeCnt = 0 // 记录使用了多少次删除节点的dom操作
+let moveCnt = 0
+
 const renderer = createRenderer({
     createElement(tag: string) {
+        createCnt += 1
         return document.createElement(tag)
     },
     setElementText(el: HTMLElement, text: string) {
         el.textContent = text
     },
     insert(el: HTMLElement, parent: HTMLElement, anchor: Node | null = null) {
+        moveCnt += 1
         parent.insertBefore(el, anchor)
     },
     patchProps(el: HTMLElement, key: string, prevValue: any, nextValue: any) {
@@ -247,6 +322,7 @@ const renderer = createRenderer({
         if(!vnode.el) return
         const parent = vnode.el.parentNode
         if (parent) {
+            removeCnt += 1
             parent.removeChild(vnode.el)
         }
     }
@@ -259,6 +335,7 @@ function propsTest() {
         props: {
             id: 'foo'
         },
+        key: '1',
         children: [
             {
                 type: "p",
@@ -278,6 +355,7 @@ function helpTest(vnode: vnode | null, id = "app") {
 function classTest() {
     const vnode1 = {
         type: "p",
+        key: '1',
         props: {
             class: "foo bar"
         },
@@ -286,6 +364,7 @@ function classTest() {
     const cls = {tee: true, pee: false}
     const vnode2 = {
         type: "p",
+        key: '1',
         props: {
             class: normalizeClass(cls)
         }
@@ -297,6 +376,7 @@ function classTest() {
     ]
     const vnode3 = {
         type: "p",
+        key: '1',
         props: {
             class: normalizeClass(arr)
         }
@@ -310,6 +390,7 @@ function classTest() {
 function unmountTest() {
     const vnode1 = {
         type: "p",
+        key: '1',
         children: "你应该看不到我才对"
     }
 
@@ -320,6 +401,7 @@ function unmountTest() {
 function eventTest() {
     const vnode = {
         type: "button",
+        key: '1',
         props: {
             onClick: [
                 () => {
@@ -341,6 +423,7 @@ function baseTest() {
     effect(() => {
         const vnode = {
             type: "p",
+            key: '1',
             children: `${count.value}`
         }
         helpTest(vnode)
@@ -348,8 +431,40 @@ function baseTest() {
     count.value++
 }
 
+function simpleDiffTest() {
+    const oldVnode = {
+        type: 'div',
+        key: 'oldVnode',
+        children: [
+            { type: 'p', children: '1', key: 1},
+            { type: 'p', children: '2', key: 2},
+            { type: 'p', children: 'hello', key: 3},
+        ]
+    }
+
+    const newVnode = {
+        type: 'div',
+        key: 'newVnode',
+        children: [
+            { type: 'p', children: 'world', key: 3},
+            { type: 'p', children: 'world', key: 4},
+            { type: 'p', children: '2', key: 2},
+        ]
+    }
+
+    // 挂载
+    helpTest(oldVnode)
+    setTimeout(() => {
+        helpTest(newVnode)
+
+        // 统计信息
+        console.log(`共使用了${createCnt}次创建dom操作，${removeCnt}次删除dom操作, ${moveCnt}次移动操作`)
+    }, 1000)
+}
+
 ;(function test() {
-    baseTest()
+    simpleDiffTest()
+    // baseTest()
     // propsTest()
     // classTest()
     // unmountTest()

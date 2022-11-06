@@ -8,7 +8,8 @@ interface vnode {
     // 使用Record限制对象的键名
     props?: Record<string, any>,
     // vnode对应的真实dom
-    el?: HTMLElement
+    el?: HTMLElement,
+    key: string
 }
 
 interface CreateRendererOptions {
