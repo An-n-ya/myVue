@@ -160,6 +160,104 @@ function createRenderer(options: CreateRendererOptions) {
         }
     }
 
+    function dualEndDiff(oldChildren: vnode[] | undefined[], newChildren: vnode[], container: HTMLElement) {
+        // 四个索引值
+        let oldStartIdx = 0
+        let oldEndIdx = oldChildren.length - 1
+        let newStartIdx = 0
+        let newEndIdx = newChildren.length - 1
+
+        // 四个索引指向的 vnode 节点
+        let oldStartVNode = oldChildren[oldStartIdx]
+        let oldEndVNode = oldChildren[oldEndIdx]
+        let newStartVNode = newChildren[newStartIdx]
+        let newEndVNode = newChildren[newEndIdx]
+
+        // 进入循环
+        while (oldStartIdx <= oldEndIdx && newStartIdx <= newEndIdx) {
+            if (!oldStartVNode) {
+                oldStartVNode = oldChildren[++oldStartIdx]
+            } else if (!oldEndVNode) {
+                oldEndVNode = oldChildren[--oldEndIdx]
+            } else if (oldStartVNode.key === newStartVNode.key) {
+                patch(oldStartVNode, newStartVNode, container)
+                oldStartVNode = oldChildren[++oldStartIdx]
+                newStartVNode = newChildren[++newStartIdx]
+
+            } else if (oldEndVNode.key === newEndVNode.key) {
+                // 新节点仍然处在末尾位置，不需要移动
+                // 只需要打补丁
+                patch(oldEndVNode, newEndVNode, container)
+                // 更新指针
+                oldEndVNode = oldChildren[--oldEndIdx]
+                newEndVNode = newChildren[--newEndIdx]
+
+            } else if (oldStartVNode.key === newEndVNode.key) {
+                // 先打补丁🍮
+                patch(oldStartVNode, newEndVNode, container)
+                // 此时头节点需要移动到末尾
+                insert(oldStartVNode.el, container, oldEndVNode.el?.nextSibling)
+
+                oldStartVNode = oldChildren[++oldStartIdx]
+                newEndVNode = newChildren[--newEndIdx]
+
+            } else if (oldEndVNode.key === newStartVNode.key) {
+                // 先打补丁🍮
+                patch(oldEndVNode, newStartVNode, container)
+                // 移动DOM
+                insert(oldEndVNode.el, container, oldStartVNode.el)
+
+                // 更新指针
+                oldEndVNode = oldChildren[--oldEndIdx]
+                newStartVNode = newChildren[++newStartIdx]
+            } else {
+                // 四种情况都没有命中 (这一步的复杂度最高，因为需要遍历查找）
+                // 在最坏情况下，如果每次都进入这一步，该方法就会退化成简单diff(可以用哈希表简化)
+                // 从oldChildren中遍历寻找和newStartVNode
+                const idxInOld = oldChildren.findIndex(
+                    node => node && node.key === newStartVNode.key
+                )
+
+                if (idxInOld > 0) {
+                    // 说明新节点是可复用的节点，移动到头部即可
+                    const vnodeToMove = oldChildren[idxInOld]
+                    if (!vnodeToMove) {
+                        /// 既然idxInOld大于零，应该不可能进入到这里
+                        continue
+                    }
+                    // 打补丁
+                    patch(vnodeToMove, newStartVNode, container)
+                    // 移动到头部
+                    insert(vnodeToMove.el, container, oldStartVNode.el)
+                    // idxIndOld处的节点已经移动，因此置undefined
+                    oldChildren[idxInOld] = undefined
+                } else {
+                    // 如果没有找到，说明是新节点
+                    patch(null, newStartVNode, container, oldStartVNode.el)
+                }
+                newStartVNode = newChildren[++newStartIdx]
+            }
+        }
+        if (oldEndIdx < oldStartIdx && newStartIdx <= newEndIdx) {
+            // 循环结束后，判断是否还有遗留的新节点
+            if (oldStartVNode) {
+                for (let i = newStartIdx; i <= newEndIdx; i++) {
+                    // 把剩下的节点都加入到头部
+                    patch(null, newChildren[i], container, oldStartVNode.el)
+                }
+            }
+        } else if (newEndIdx < newStartIdx && oldStartIdx <= oldEndIdx) {
+            // 判断是否还有剩余的旧节点，这些节点需要卸载
+            for (let i = oldStartIdx; i <= oldEndIdx; i++) {
+                if (oldChildren[i]) {
+                    // @ts-ignore
+                    unmount(oldChildren[i])
+                }
+            }
+        }
+
+    }
+
 
     function patchChildren(n1: vnode, n2: vnode, container: HTMLElement) {
         // 先判断新节点是字符串的情况
@@ -176,6 +274,7 @@ function createRenderer(options: CreateRendererOptions) {
             if (Array.isArray(n1.children)) {
                 // 如果旧节点也是一组节点，需要用到diff算法
                 // Done: diff算法
+                // dualEndDiff(n1.children, n2.children, container)
                 simpleDiff(n1.children, n2.children, container)
                 // bruteDiff(n1.children, n2.children, container)
             } else {
