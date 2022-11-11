@@ -2,22 +2,28 @@ interface HTMLElement extends Record<string, any>{
     _vnode?: vnode | null
 }
 
+type LifeCycleFn = (context?: any) => any
+
 interface Component {
     name: string,
+    props?: Record<string, any>,
+    methods?: Recode<string, Fn>,
     render: () => vnode,
     data(),
-    beforeCreate?: Fn,
-    created?: Fn,
-    beforeMount?: Fn,
-    mounted?: Fn,
-    beforeUpdate?: Fn,
-    updated?: Fn,
+    beforeCreate?: LifeCycleFn,
+    created?: LifeCycleFn,
+    beforeMount?: LifeCycleFn,
+    mounted?: LifeCycleFn,
+    beforeUpdate?: LifeCycleFn,
+    updated?: LifeCycleFn,
 }
 
 interface ComponentInstance {
     state: any,
     isMounted: boolean,
-    subTree: vnode | null
+    subTree: vnode | null,
+    props: any,
+    methods: Record<string, Fn>
 }
 
 interface vnode {

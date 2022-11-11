@@ -1,4 +1,4 @@
-import { ref, effect, reactive } from "./reactivity.js";
+import { ref, effect, reactive, shallowReactive } from "./reactivity.js";
 function shouldSetAsProps(el, key, value) {
     // 对一些属性做特殊处理
     // input 的 form 属性是只读的
@@ -85,6 +85,21 @@ function createRenderer(options) {
             }
         }
     }
+    function resolveProps(options, propsData) {
+        const props = {};
+        const attrs = {};
+        for (const key in propsData) {
+            if (options && key in options) {
+                // 组件的props里的属性(即用：修饰过的props)作为props
+                props[key] = propsData[key];
+            }
+            else {
+                // 组件props以外的属性，作为attrs
+                attrs[key] = propsData[key];
+            }
+        }
+        return [props, attrs];
+    }
     // 挂载组件
     function mountComponent(vnode, container, anchor) {
         if (typeof vnode.type === 'string') {
@@ -94,41 +109,77 @@ function createRenderer(options) {
         // 获取组件对象
         const componentOptions = vnode.type;
         // 获取组件的render函数和data函数
-        const { render, data, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated } = componentOptions;
+        const { render, data, methods, props: propsOption, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated } = componentOptions;
         // 创建之前
         beforeCreate && beforeCreate();
         // 响应化data
         const state = reactive(data());
+        const [props, attrs] = resolveProps(propsOption, vnode.props);
         // 创建一个组件实例，作为组件状态的一个集合，用于统一管理
         const instance = {
             state,
             isMounted: false,
-            subTree: null // 组件所渲染的vnode
+            subTree: null,
+            props: shallowReactive(props),
+            methods
         };
         // 将instance设置到vnode上，用于后续更新
         vnode.component = instance;
+        const renderContext = new Proxy(instance, {
+            get(t, k, r) {
+                const { state, props } = t;
+                if (state && k in state) {
+                    // 现在state里找
+                    return state[k];
+                }
+                else if (k in props) {
+                    // 再在props里找
+                    return props[k];
+                }
+                else if (k in methods) {
+                    return methods[k];
+                }
+                else {
+                    console.error("属性不在组件实例中");
+                }
+            },
+            set(t, k, v, r) {
+                const { state, props } = t;
+                if (state && k in state) {
+                    state[k] = v;
+                }
+                else if (k in props) {
+                    props[k] = v;
+                }
+                else {
+                    console.error("属性不在组件实例中");
+                    return false;
+                }
+                return true;
+            }
+        });
         // 实例创建完毕，调用created
-        created && created();
+        created && created(renderContext);
         effect(() => {
             // 执行渲染函数
-            const subTree = render.call(state);
+            const subTree = render.call(renderContext);
             if (!instance.isMounted) {
                 // 挂载前调用beforeMount
-                beforeMount && beforeMount();
+                beforeMount && beforeMount(renderContext);
                 // 初次加载，patch的第一个参数是null
                 patch(null, subTree, container, anchor);
                 // 设置isMounted
                 instance.isMounted = true;
                 // 挂载完后调用mounted
-                mounted && mounted();
+                mounted && mounted(renderContext);
             }
             else {
                 // 更新前调用beforeUpdate
-                beforeUpdate && beforeUpdate();
+                beforeUpdate && beforeUpdate(renderContext);
                 // 若组件之前已经加载
                 patch(instance.subTree, subTree, container, anchor);
                 // 更新完后调用updated
-                updated && updated();
+                updated && updated(renderContext);
             }
             // 更新 subTree
             instance.subTree = subTree;
@@ -139,6 +190,48 @@ function createRenderer(options) {
     }
     // 对组件打补丁
     function patchComponent(n1, n2, anchor) {
+        // 复用component，让新vnode n2的component指向n1的
+        const instance = (n2.component = n1.component);
+        if (!instance || typeof n2.type === 'string' || typeof n1.type === 'string') {
+            // 如果类型不对，直接返回
+            return;
+        }
+        const { props } = instance;
+        if (hasProsChanged(n1.props, n2.props)) {
+            // 从新的vnode中找出props
+            const [nextProps] = resolveProps(n2.type.props, n2.props);
+            // 更新props
+            for (const k in nextProps) {
+                // 这里的props是代理对象，在代理函数中进行了响应式操作
+                props[k] = nextProps[k];
+            }
+            // 删除不存在的props
+            for (const k in props) {
+                if (!(k in nextProps))
+                    delete props[k];
+            }
+        }
+    }
+    function hasProsChanged(prevProps, nextProps) {
+        if (!prevProps && !nextProps) {
+            return false;
+        }
+        else if (!prevProps || !nextProps) {
+            return true;
+        }
+        const nextKeys = Object.keys(nextProps);
+        if (nextKeys.length !== Object.keys(prevProps).length) {
+            return true;
+        }
+        for (let i = 0; i < nextKeys.length; i++) {
+            const key = nextKeys[i];
+            // 有不相等的props，这说明有变化
+            // @ts-ignore
+            if (nextProps[key] !== prevProps[key]) {
+                return true;
+            }
+        }
+        return false;
     }
     function patchElement(n1, n2) {
         // n1的el赋值给n2 (这个赋值操作，就是所谓的复用DOM了)
@@ -619,6 +712,9 @@ function simpleDiffTest() {
 function componentTest() {
     const MyComponent = {
         name: 'MyComponent',
+        props: {
+            title: String
+        },
         data() {
             return {
                 foo: 1
@@ -626,15 +722,37 @@ function componentTest() {
         },
         // @ts-ignore
         render() {
-            // @ts-ignore
-            return { type: 'div', children: `foo 的值是: ${this.foo}` };
+            return {
+                type: 'div',
+                // @ts-ignore
+                children: `${this.title} \n foo 的值是: ${this.foo}`
+            };
         },
         created() {
             console.log('created');
+        },
+        beforeCreate() {
+            console.log('beforeCreate');
+        },
+        beforeMount() {
+            console.log('beforeMount');
+        },
+        mounted() {
+            console.log('mounted');
         }
     };
-    const vnode = {
-        type: MyComponent
+    let vnode = {
+        type: MyComponent,
+        props: {
+            title: 'A Bit Title'
+        }
+    };
+    helpTest(vnode);
+    vnode = {
+        type: MyComponent,
+        props: {
+            title: 'A Small Title'
+        }
     };
     helpTest(vnode);
 }
