@@ -3,13 +3,15 @@ interface HTMLElement extends Record<string, any>{
 }
 
 type LifeCycleFn = (context?: any) => any
+type RenderFn = () => vnode
 
 interface Component {
     name: string,
     props?: Record<string, any>,
     methods?: Recode<string, Fn>,
-    render: () => vnode,
-    data(),
+    render?: RenderFn,
+    data?: () => any,
+    setup?: (props?: Record<string, any>, setupContext?: any) => object | RenderFn,
     beforeCreate?: LifeCycleFn,
     created?: LifeCycleFn,
     beforeMount?: LifeCycleFn,

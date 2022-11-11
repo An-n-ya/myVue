@@ -1,4 +1,4 @@
-import { ref, effect, reactive, shallowReactive } from "./reactivity.js";
+import { ref, effect, reactive, shallowReactive, shallowReadonly } from "./reactivity.js";
 function shouldSetAsProps(el, key, value) {
     // 对一些属性做特殊处理
     // input 的 form 属性是只读的
@@ -109,11 +109,11 @@ function createRenderer(options) {
         // 获取组件对象
         const componentOptions = vnode.type;
         // 获取组件的render函数和data函数
-        const { render, data, methods, props: propsOption, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated } = componentOptions;
+        let { render, data, setup, methods, props: propsOption, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated } = componentOptions;
         // 创建之前
         beforeCreate && beforeCreate();
         // 响应化data
-        const state = reactive(data());
+        const state = data ? reactive(data()) : null;
         const [props, attrs] = resolveProps(propsOption, vnode.props);
         // 创建一个组件实例，作为组件状态的一个集合，用于统一管理
         const instance = {
@@ -123,6 +123,30 @@ function createRenderer(options) {
             props: shallowReactive(props),
             methods
         };
+        function emit(event, ...payload) {
+            // 根据约定对事件名进行处理 比如 chang --> onChange
+            const eventName = `on${event[0].toUpperCase() + event.slice(1)}`;
+            // 在props寻找事件处理函数
+            const handler = instance.props[eventName];
+            if (handler) {
+                handler(...payload);
+            }
+            else {
+                console.log('事件处理函数不存在');
+            }
+        }
+        const setupContext = { attrs, emit };
+        // 调用setup函数
+        const setupResult = setup ? setup(shallowReadonly(instance.props), setupContext) : {};
+        let setupState = null;
+        if (typeof setupResult === 'function') {
+            if (render)
+                console.error('setup函数返回渲染函数，render将被忽略');
+            render = setupResult;
+        }
+        else {
+            setupState = setupResult;
+        }
         // 将instance设置到vnode上，用于后续更新
         vnode.component = instance;
         const renderContext = new Proxy(instance, {
@@ -132,12 +156,15 @@ function createRenderer(options) {
                     // 现在state里找
                     return state[k];
                 }
-                else if (k in props) {
+                else if (props && k in props) {
                     // 再在props里找
                     return props[k];
                 }
-                else if (k in methods) {
+                else if (methods && k in methods) {
                     return methods[k];
+                }
+                else if (setupState && k in setupState) {
+                    return setupState[k];
                 }
                 else {
                     console.error("属性不在组件实例中");
@@ -148,8 +175,14 @@ function createRenderer(options) {
                 if (state && k in state) {
                     state[k] = v;
                 }
-                else if (k in props) {
+                else if (props && k in props) {
                     props[k] = v;
+                }
+                else if (methods && k in methods) {
+                    methods[k] = v;
+                }
+                else if (setupState && k in setupState) {
+                    setupState[k] = v;
                 }
                 else {
                     console.error("属性不在组件实例中");
@@ -725,7 +758,7 @@ function componentTest() {
             return {
                 type: 'div',
                 // @ts-ignore
-                children: `${this.title} \n foo 的值是: ${this.foo}`
+                children: `${this.title}  foo 的值是: ${this.foo}`
             };
         },
         created() {
@@ -756,9 +789,56 @@ function componentTest() {
     };
     helpTest(vnode);
 }
+function setupTest() {
+    const MyComponent = {
+        name: 'MyComponent',
+        props: {
+            title: String,
+            onChange: Function
+        },
+        data() {
+            return {
+                foo: 1
+            };
+        },
+        // @ts-ignore
+        render() {
+            return {
+                type: 'div',
+                // @ts-ignore
+                children: `${this.title}  foo 的值是: ${this.foo} bar的值是：${this.bar}`
+            };
+        },
+        setup(props, setupContext) {
+            console.log(props.title);
+            const { attrs, emit } = setupContext;
+            console.log(attrs);
+            emit('change', 1, 2);
+            return {
+                bar: 2
+            };
+        }
+    };
+    const handler = (...args) => {
+        console.log('onChange介绍到的参数如下');
+        for (let a in args) {
+            console.log(a);
+        }
+    };
+    const vnode = {
+        type: MyComponent,
+        props: {
+            title: 'hello',
+            foo: 1,
+            onChange: handler
+        }
+    };
+    helpTest(vnode);
+}
 ;
 (function test() {
-    componentTest();
+    setupTest();
+    // componentTest()
     // simpleDiffTest()
     // baseTest()
     // propsTest()
