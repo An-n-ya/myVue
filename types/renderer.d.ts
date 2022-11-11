@@ -2,14 +2,33 @@ interface HTMLElement extends Record<string, any>{
     _vnode?: vnode | null
 }
 
+interface Component {
+    name: string,
+    render: () => vnode,
+    data(),
+    beforeCreate?: Fn,
+    created?: Fn,
+    beforeMount?: Fn,
+    mounted?: Fn,
+    beforeUpdate?: Fn,
+    updated?: Fn,
+}
+
+interface ComponentInstance {
+    state: any,
+    isMounted: boolean,
+    subTree: vnode | null
+}
+
 interface vnode {
-    type: string,
+    type: string | Component,
     children?: any,
     // 使用Record限制对象的键名
     props?: Record<string, any>,
     // vnode对应的真实dom
     el?: HTMLElement,
-    key: string
+    key?: string,
+    component?: ComponentInstance
 }
 
 interface CreateRendererOptions {

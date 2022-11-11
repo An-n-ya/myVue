@@ -1,4 +1,4 @@
-import {ref, effect} from "./reactivity.js"
+import {ref, effect, reactive} from "./reactivity.js"
 
 
 function shouldSetAsProps(el: HTMLElement, key: string, value: any) {
@@ -14,7 +14,6 @@ function normalizeClass(input: any) {
     let ret = []
     if (Array.isArray(input)) {
         for (const ele of input) {
-            console.log(ele)
             if (typeof ele === 'string') {
                 ret.push(ele)
             } else if (typeof ele === 'object') {
@@ -46,10 +45,37 @@ function createRenderer(options: CreateRendererOptions) {
         unmount
     } = options
 
+    // 任务缓存队列
+    const queue = new Set<Fn>()
+    let isFlushing = false
+    const p = Promise.resolve()
+
+    function queueJob(job: Fn) {
+        queue.add(job)
+        if (!isFlushing) {
+            isFlushing = true
+            // 在微任务中刷新缓冲队列
+            p.then(() => {
+                try {
+                    // 执行任务队列中的任务
+                    queue.forEach(job => job())
+                } finally {
+                    // 重置状态
+                    isFlushing = false
+                    queue.clear()
+                }
+            })
+        }
+    }
+
     function patch(n1: vnode | undefined | null, n2: vnode, container: HTMLElement, anchor: Node | null = null) {
         if (!n1) {
-            // 如果n1 不存在，意味着挂载
-            mountElement(n2, container, anchor)
+            if (typeof n2.type === 'string') {
+                // 如果n1 不存在，意味着挂载
+                mountElement(n2, container, anchor)
+            } else if (typeof n2.type === 'object') {
+                mountComponent(n2, container, anchor)
+            }
         } else if (n1 && n1.type !== n2.type) {
             // 如果n1存在， 并且n1的类型和n2的类型不一致，则直接卸载n1
             unmount(n1)
@@ -61,14 +87,90 @@ function createRenderer(options: CreateRendererOptions) {
                 // DONE: patchElement(n1, n2)
                 patchElement(n1, n2)
             } else if (typeof type === 'object') {
-                // 如果n2.type是对象，则描述的是组件
+                // 如果n1存在，意味着打补丁，这时候是对组件打补丁
+                patchComponent(n1, n2, anchor)
             }
 
         }
     }
 
+    // 挂载组件
+    function mountComponent(vnode: vnode, container: HTMLElement, anchor: Node | null) {
+        if (typeof vnode.type === 'string') {
+            // 只处理组件
+            return
+        }
+        // 获取组件对象
+        const componentOptions = vnode.type
+        // 获取组件的render函数和data函数
+        const {
+            render,
+            data,
+            beforeCreate,
+            created,
+            beforeMount,
+            mounted,
+            beforeUpdate,
+            updated
+        } = componentOptions
+
+        // 创建之前
+        beforeCreate && beforeCreate()
+
+        // 响应化data
+        const state = reactive(data())
+
+        // 创建一个组件实例，作为组件状态的一个集合，用于统一管理
+        const instance: ComponentInstance = {
+            state,              // 组件自身状态
+            isMounted: false,   // 表示组件是否已经被挂载
+            subTree: null       // 组件所渲染的vnode
+        }
+
+
+        // 将instance设置到vnode上，用于后续更新
+        vnode.component = instance
+
+        // 实例创建完毕，调用created
+        created && created()
+
+        effect(() => {
+            // 执行渲染函数
+            const subTree = render.call(state)
+            if (!instance.isMounted) {
+                // 挂载前调用beforeMount
+                beforeMount && beforeMount()
+                // 初次加载，patch的第一个参数是null
+                patch(null, subTree, container, anchor)
+                // 设置isMounted
+                instance.isMounted = true
+
+                // 挂载完后调用mounted
+                mounted && mounted()
+            } else {
+                // 更新前调用beforeUpdate
+                beforeUpdate && beforeUpdate()
+                // 若组件之前已经加载
+                patch(instance.subTree, subTree, container, anchor)
+
+                // 更新完后调用updated
+                updated && updated()
+            }
+            // 更新 subTree
+            instance.subTree = subTree
+            // patch函数打补丁
+        }, {
+            scheduler: queueJob
+        })
+
+    }
+
+    // 对组件打补丁
+    function patchComponent(n1: vnode, n2: vnode, anchor: Node | null) {
+
+    }
+
     function patchElement(n1: vnode, n2: vnode) {
-        console.log(n1, n2)
         // n1的el赋值给n2 (这个赋值操作，就是所谓的复用DOM了)
         const el = n2.el = n1.el
         const oldProps = n1.props || {}
@@ -121,7 +223,6 @@ function createRenderer(options: CreateRendererOptions) {
                         if (prevNode) {
                             // 将当前节点移动到上一个节点的后面
                             const anchor = prevNode.el?.nextSibling
-                            console.log('anchor', anchor)
                             insert(newVnode.el, container, anchor)
                         }
                     } else {
@@ -299,6 +400,9 @@ function createRenderer(options: CreateRendererOptions) {
     function mountElement(vnode: vnode, container: HTMLElement, anchor: Node | null) {
         // 创建 DOM 元素
         // 把真实 dom 元素和 vnode 关联起来
+        if (typeof vnode.type !== 'string') {
+            return;
+        }
         const el = vnode.el = createElement(vnode.type)
         if (typeof vnode.children === "string") {
             // 如果 vnode 的子节点是字符串，代表元素只有文本节点
@@ -518,7 +622,6 @@ function eventTest() {
 
 function baseTest() {
     const count = ref(1)
-    console.log(count.value)
     effect(() => {
         const vnode = {
             type: "p",
@@ -561,8 +664,34 @@ function simpleDiffTest() {
     }, 1000)
 }
 
+function componentTest() {
+    const MyComponent = {
+        name: 'MyComponent',
+        data() {
+            return {
+                foo: 1
+            }
+        },
+        // @ts-ignore
+        render() {
+            // @ts-ignore
+            return { type: 'div', children: `foo 的值是: ${this.foo}`}
+        },
+        created() {
+            console.log('created')
+        }
+    }
+
+    const vnode = {
+        type: MyComponent
+    }
+
+    helpTest(vnode)
+}
+
 ;(function test() {
-    simpleDiffTest()
+    componentTest()
+    // simpleDiffTest()
     // baseTest()
     // propsTest()
     // classTest()

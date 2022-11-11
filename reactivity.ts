@@ -1,4 +1,4 @@
-export {ref, effect}
+export {ref, effect, reactive}
 // interface EffectFunction {
 //     (): any
 //     deps: DepsSet[]

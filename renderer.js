@@ -1,4 +1,4 @@
-import { ref, effect } from "./reactivity.js";
+import { ref, effect, reactive } from "./reactivity.js";
 function shouldSetAsProps(el, key, value) {
     // 对一些属性做特殊处理
     // input 的 form 属性是只读的
@@ -10,7 +10,6 @@ function normalizeClass(input) {
     let ret = [];
     if (Array.isArray(input)) {
         for (const ele of input) {
-            console.log(ele);
             if (typeof ele === 'string') {
                 ret.push(ele);
             }
@@ -36,10 +35,37 @@ function createRenderer(options) {
     // 通过options得到控制 node 的操作
     // 用以跨平台
     const { createElement, insert, setElementText, patchProps, unmount } = options;
+    // 任务缓存队列
+    const queue = new Set();
+    let isFlushing = false;
+    const p = Promise.resolve();
+    function queueJob(job) {
+        queue.add(job);
+        if (!isFlushing) {
+            isFlushing = true;
+            // 在微任务中刷新缓冲队列
+            p.then(() => {
+                try {
+                    // 执行任务队列中的任务
+                    queue.forEach(job => job());
+                }
+                finally {
+                    // 重置状态
+                    isFlushing = false;
+                    queue.clear();
+                }
+            });
+        }
+    }
     function patch(n1, n2, container, anchor = null) {
         if (!n1) {
-            // 如果n1 不存在，意味着挂载
-            mountElement(n2, container, anchor);
+            if (typeof n2.type === 'string') {
+                // 如果n1 不存在，意味着挂载
+                mountElement(n2, container, anchor);
+            }
+            else if (typeof n2.type === 'object') {
+                mountComponent(n2, container, anchor);
+            }
         }
         else if (n1 && n1.type !== n2.type) {
             // 如果n1存在， 并且n1的类型和n2的类型不一致，则直接卸载n1
@@ -54,12 +80,67 @@ function createRenderer(options) {
                 patchElement(n1, n2);
             }
             else if (typeof type === 'object') {
-                // 如果n2.type是对象，则描述的是组件
+                // 如果n1存在，意味着打补丁，这时候是对组件打补丁
+                patchComponent(n1, n2, anchor);
             }
         }
     }
+    // 挂载组件
+    function mountComponent(vnode, container, anchor) {
+        if (typeof vnode.type === 'string') {
+            // 只处理组件
+            return;
+        }
+        // 获取组件对象
+        const componentOptions = vnode.type;
+        // 获取组件的render函数和data函数
+        const { render, data, beforeCreate, created, beforeMount, mounted, beforeUpdate, updated } = componentOptions;
+        // 创建之前
+        beforeCreate && beforeCreate();
+        // 响应化data
+        const state = reactive(data());
+        // 创建一个组件实例，作为组件状态的一个集合，用于统一管理
+        const instance = {
+            state,
+            isMounted: false,
+            subTree: null // 组件所渲染的vnode
+        };
+        // 将instance设置到vnode上，用于后续更新
+        vnode.component = instance;
+        // 实例创建完毕，调用created
+        created && created();
+        effect(() => {
+            // 执行渲染函数
+            const subTree = render.call(state);
+            if (!instance.isMounted) {
+                // 挂载前调用beforeMount
+                beforeMount && beforeMount();
+                // 初次加载，patch的第一个参数是null
+                patch(null, subTree, container, anchor);
+                // 设置isMounted
+                instance.isMounted = true;
+                // 挂载完后调用mounted
+                mounted && mounted();
+            }
+            else {
+                // 更新前调用beforeUpdate
+                beforeUpdate && beforeUpdate();
+                // 若组件之前已经加载
+                patch(instance.subTree, subTree, container, anchor);
+                // 更新完后调用updated
+                updated && updated();
+            }
+            // 更新 subTree
+            instance.subTree = subTree;
+            // patch函数打补丁
+        }, {
+            scheduler: queueJob
+        });
+    }
+    // 对组件打补丁
+    function patchComponent(n1, n2, anchor) {
+    }
     function patchElement(n1, n2) {
-        console.log(n1, n2);
         // n1的el赋值给n2 (这个赋值操作，就是所谓的复用DOM了)
         const el = n2.el = n1.el;
         const oldProps = n1.props || {};
@@ -110,7 +191,6 @@ function createRenderer(options) {
                         if (prevNode) {
                             // 将当前节点移动到上一个节点的后面
                             const anchor = (_a = prevNode.el) === null || _a === void 0 ? void 0 : _a.nextSibling;
-                            console.log('anchor', anchor);
                             insert(newVnode.el, container, anchor);
                         }
                     }
@@ -198,6 +278,7 @@ function createRenderer(options) {
             }
             else {
                 // 四种情况都没有命中 (这一步的复杂度最高，因为需要遍历查找）
+                // 在最坏情况下，如果每次都进入这一步，该方法就会退化成简单diff(可以用哈希表简化)
                 // 从oldChildren中遍历寻找和newStartVNode
                 const idxInOld = oldChildren.findIndex(node => node && node.key === newStartVNode.key);
                 if (idxInOld > 0) {
@@ -283,6 +364,9 @@ function createRenderer(options) {
     function mountElement(vnode, container, anchor) {
         // 创建 DOM 元素
         // 把真实 dom 元素和 vnode 关联起来
+        if (typeof vnode.type !== 'string') {
+            return;
+        }
         const el = vnode.el = createElement(vnode.type);
         if (typeof vnode.children === "string") {
             // 如果 vnode 的子节点是字符串，代表元素只有文本节点
@@ -495,7 +579,6 @@ function eventTest() {
 }
 function baseTest() {
     const count = ref(1);
-    console.log(count.value);
     effect(() => {
         const vnode = {
             type: "p",
@@ -533,9 +616,32 @@ function simpleDiffTest() {
         console.log(`共使用了${createCnt}次创建dom操作，${removeCnt}次删除dom操作, ${moveCnt}次移动操作`);
     }, 1000);
 }
+function componentTest() {
+    const MyComponent = {
+        name: 'MyComponent',
+        data() {
+            return {
+                foo: 1
+            };
+        },
+        // @ts-ignore
+        render() {
+            // @ts-ignore
+            return { type: 'div', children: `foo 的值是: ${this.foo}` };
+        },
+        created() {
+            console.log('created');
+        }
+    };
+    const vnode = {
+        type: MyComponent
+    };
+    helpTest(vnode);
+}
 ;
 (function test() {
-    simpleDiffTest();
+    componentTest();
+    // simpleDiffTest()
     // baseTest()
     // propsTest()
     // classTest()
