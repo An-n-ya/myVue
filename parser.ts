@@ -1,4 +1,4 @@
-export {tokenize}
+export {tokenize, parse}
 const State = {
     initial: 1,     // 初始状态
     tagOpen: 2,     // 标签开始状态
@@ -19,7 +19,7 @@ function isText(char: string) {
 // endregion
 
 /**
- * 讲字符串切割为token
+ * 将字符串切割为token
  * @param str 输入字符串
  * @return token 数组
  */
@@ -101,4 +101,61 @@ function tokenize(str: string) {
         str = str.slice(1)
     }
     return tokens
+}
+
+/**
+ * 将字符串解析为template ast
+ * @param str
+ * @return template ast
+ */
+function parse(str: string) {
+    // 先进行tokenize
+    const tokens = tokenize(str)
+
+    const root: AstNode = {
+        type: 'Root',
+        children: []
+    }
+
+    // element栈，起初只有Root节点
+    const elementStack = [root]
+    while (tokens.length) {
+        // 栈顶元素为父元素
+        const parent = elementStack[elementStack.length - 1]
+        // 将组件加入父组件
+        const t = tokens[0]
+        switch(t.type) {
+            case 'tag':
+                const elementNode = {
+                    type: 'Element',
+                    tag: t.name,
+                    children: []
+                }
+                if (!parent.children) {
+                    console.error('父组件必须要有children')
+                    return
+                }
+                parent.children.push(elementNode)
+                elementStack.push(elementNode)
+                break
+            case 'text':
+                const textNode = {
+                    type: 'Text',
+                    content: t.content
+                }
+                if (!parent.children) {
+                    console.error('父组件必须要有children')
+                    return
+                }
+                parent.children.push(textNode)
+                break
+            case 'tagEnd':
+                // 遇到结束标签，弹出栈顶
+                elementStack.pop()
+                break
+        }
+        // 消费tokens
+        tokens.shift()
+    }
+    return root
 }
