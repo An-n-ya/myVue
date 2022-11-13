@@ -1,4 +1,4 @@
-export {tokenize, parse}
+export {tokenize, parse, dump, transform}
 const State = {
     initial: 1,     // 初始状态
     tagOpen: 2,     // 标签开始状态
@@ -112,7 +112,7 @@ function parse(str: string) {
     // 先进行tokenize
     const tokens = tokenize(str)
 
-    const root: AstNode = {
+    const root: TemplateAstNode = {
         type: 'Root',
         children: []
     }
@@ -159,3 +159,167 @@ function parse(str: string) {
     }
     return root
 }
+
+function dump(node: TemplateAstNode | undefined, indent = 0) {
+    if (!node) {
+        return ''
+    }
+    let res = ''
+    const type = node.type
+    const desc = node.type === 'Root'
+        ? ''
+        : node.type === 'Element'
+            ? node.tag
+            : node.content
+    console.log(`${'-'.repeat(indent)}${type}: ${desc}`)
+    res = res + `${'-'.repeat(indent)}${type}: ${desc}\n`
+
+    if (node.children) {
+        // 递归的打印子节点
+        node.children.forEach(n => res += dump(n, indent + 2))
+    }
+    return res
+}
+
+function traverseNode(ast: TemplateAstNode | undefined, context: TraverseCtx) {
+    if (!ast) return
+    context.currentNode = ast
+    // 退出阶段的回调函数数组
+    const exitFns = []
+    const currentNode = ast
+
+
+    const transforms = context.nodeTransforms
+    if (transforms) {
+        for (let i = 0; i < transforms.length; i++) {
+            // 转换函数的返回值作为退出阶段的回调函数
+            const onExit = transforms[i](currentNode, context)
+            if (onExit) {
+                exitFns.push(onExit)
+            }
+            if (!context.currentNode) return
+        }
+    }
+
+    const children = currentNode.children
+    if (children) {
+        for (let i = 0; i < children.length; i++) {
+            context.parent = context.currentNode
+            context.childIndex = i
+            traverseNode(children[i], context)
+        }
+    }
+    // console.log(exitFns)
+    for (let i = 0; i < exitFns.length; i++) {
+        exitFns[i]()
+    }
+}
+
+function transform(ast: TemplateAstNode | undefined) {
+    if(!ast) return
+    const context: TraverseCtx = {
+        currentNode: null,
+        childIndex: 0,
+        parent: null,
+        nodeTransforms: [
+            transformElement,
+            transformText,
+            transformRoot
+        ],
+        replaceNode(node: TemplateAstNode) {
+            if (context.parent && context.parent.children) {
+                context.parent.children[context.childIndex] = node
+            }
+            context.currentNode = node
+        },
+        removeNode(node: TemplateAstNode) {
+            if (context.parent && context.parent.children) {
+                context.parent.children.splice(context.childIndex, 1)
+                context.currentNode = null
+            }
+        }
+    }
+    traverseNode(ast, context)
+    return ast
+}
+
+function transformElement(node: TemplateAstNode, context: TraverseCtx) {
+    // 返回一个回调函数，这个回调函数将在退出阶段调用
+    return () => {
+        if (node.type !== 'Element' || !node.tag) return
+        // 创建h函数
+        const callExp = createCallExpression('h', [
+            createStringLiteral(node.tag)
+        ])
+        const ArrayElements: Literal[] = []
+        // 处理h函数调用的参数
+        if (node.children?.length === 1) {
+            if (node.children && node.children[0].jsNode) {
+                callExp.arguments.push(node.children[0].jsNode)
+            }
+        } else {
+            if (node.children){
+                callExp.arguments.push(
+                    createArrayExpression(node.children.map(c => c.jsNode as Literal))
+                )
+            }
+        }
+        node.jsNode = callExp
+    }
+}
+
+function transformText(node: TemplateAstNode, context: TraverseCtx) {
+    // 创建文本jsAST
+    if (node.type === 'Text' && node.content) {
+        node.jsNode = createStringLiteral(node.content)
+    }
+}
+
+function transformRoot(node: TemplateAstNode, context: TraverseCtx) {
+    return () => {
+        if (node.type !== 'Root' || !node.children) return
+        const vnodeJSAST = node.children[0].jsNode
+        node.jsNode = {
+            type: "FunctionDecl",
+            id: {
+                type: 'Identifier',
+                name: 'render'
+            },
+            params: [],
+            body: [{ type: "ReturnStatement", return: vnodeJSAST } as ReturnStatement]
+        } as FunctionASTNode
+    }
+}
+
+
+// region 创建JavaScriptAST节点的帮助函数
+function createStringLiteral(value: string): StringLiteral {
+    return <StringLiteral>{
+        type: "StringLiteral",
+        value
+    }
+}
+
+function createIdentifier(name: string) {
+    return {
+        type: 'Identifier',
+        name
+    }
+}
+
+function createArrayExpression(elements: Literal[]): ArrayLiteral {
+    return <ArrayLiteral>{
+        type: "ArrayExpression",
+        elements
+    }
+}
+
+function createCallExpression(callee: string, args: Literal[]): CallExpressionNode {
+    return <CallExpressionNode>{
+        type: "CallExpression",
+        callee: createIdentifier(callee),
+        arguments: args
+    }
+}
+
+// endregion
