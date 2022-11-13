@@ -1,4 +1,4 @@
-import {tokenize, parse, dump, transform} from "../parser";
+import {tokenize, parse, dump, transform, generate} from "../parser";
 
 describe('tokenize解析', ()=> {
     test('p标签解析', () => {
@@ -166,7 +166,21 @@ describe('javascript AST 解析', () => {
             ]
         }
         const ast = transform(parse(str))
-        console.log(ast)
         expect(JSON.stringify(!ast ? {} : ast.jsNode)).toBe(JSON.stringify(expects))
+    })
+})
+
+describe('生成js代码', () => {
+    test('生成嵌套div标签', () => {
+        const str = `<div><p>Vue</p><p>Template</p></div>`
+        const expects = `function render() {
+  return h('div', [h('p', 'Vue'), h('p', 'Template')])
+}`
+        const ast = transform(parse(str))
+        let result = ''
+        if (ast) {
+            result = generate(ast.jsNode)
+        }
+        expect(result).toBe(expects)
     })
 })

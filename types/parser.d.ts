@@ -17,14 +17,20 @@ interface TraverseCtx {
     nodeTransforms?: TransformFn[]
 }
 
+interface GenerateCtx {
+    code: string,
+    currentIndent: number,
+    push(code: string),
+    newline(),
+    indent(),
+    deIndent()
+}
+
 enum JSASTType {
     'FunctionDecl'='FunctionDecl',
     'CallExpression'='CallExpression',
     'StringLiteral'='StringLiteral',
     'ArrayExpression'='ArrayExpression',
-}
-
-enum StatementType {
     'ReturnStatement'='ReturnStatement'
 }
 
@@ -49,7 +55,7 @@ interface FunctionASTNode extends JSASTNode {
     body: Statement[]
 }
 
-interface Literal {
+interface Literal extends JSASTNode{
 
 }
 

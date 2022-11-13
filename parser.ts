@@ -1,4 +1,4 @@
-export {tokenize, parse, dump, transform}
+export {tokenize, parse, dump, transform, generate}
 const State = {
     initial: 1,     // 初始状态
     tagOpen: 2,     // 标签开始状态
@@ -215,6 +215,11 @@ function traverseNode(ast: TemplateAstNode | undefined, context: TraverseCtx) {
     }
 }
 
+/**
+ * 将Template AST转化为JavaScript AST
+ * @param ast
+ * @return ast JavaScriptAST在ast的jsNode属性里
+ */
 function transform(ast: TemplateAstNode | undefined) {
     if(!ast) return
     const context: TraverseCtx = {
@@ -323,3 +328,113 @@ function createCallExpression(callee: string, args: Literal[]): CallExpressionNo
 }
 
 // endregion
+
+/**
+ * 根据JavaScript AST生成JS代码
+ * @param node
+ */
+function generate(node: JSASTNode | undefined): string {
+    const context: GenerateCtx = {
+        code: '',
+        push(code: string) {
+            context.code += code
+        },
+        currentIndent: 0, // 当前缩进
+        newline() {
+            context.code += '\n' + " ".repeat(context.currentIndent)
+        },
+        indent() {
+            context.currentIndent += 2
+            context.newline()
+        },
+        deIndent() {
+            context.currentIndent -= 2
+            context.newline()
+        }
+    }
+
+    if (!node) {
+        return ''
+    }
+
+    genNode(node, context)
+
+    return context.code
+}
+
+function genNode(node: JSASTNode, context: GenerateCtx) {
+    switch (node.type) {
+        case 'FunctionDecl':
+            genFunctionDecl(node as FunctionASTNode, context)
+            break
+        case 'ReturnStatement':
+            genReturnStatement(node as ReturnStatement, context)
+            break
+        case 'CallExpression':
+            genCallExpression(node as CallExpressionNode, context)
+            break
+        case 'StringLiteral':
+            genStringLiteral(node as StringLiteral, context)
+            break
+        case 'ArrayExpression':
+            genArrayExpression(node as ArrayLiteral, context)
+            break
+    }
+}
+
+
+function genFunctionDecl(node: FunctionASTNode, context: GenerateCtx) {
+    const { push, indent, deIndent } = context
+    push(`function ${node.id.name}`)
+    push('(')
+    genNodeList(node.params, context)
+    push(') ')
+    push('{')
+    indent()
+    node.body.forEach(n => genNode(n, context))
+    deIndent()
+    push('}')
+}
+
+// 解析nodes数组 以逗号作为分隔符
+function genNodeList(nodes: JSASTNode[], context: GenerateCtx) {
+    const { push } = context
+    for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i]
+        genNode(node, context)
+        if (i < nodes.length - 1) {
+            push(', ')
+        }
+    }
+}
+
+function genArrayExpression(node: ArrayLiteral, context: GenerateCtx) {
+    const {push} = context
+    push('[')
+    genNodeList(node.elements, context)
+    push(']')
+}
+
+function genReturnStatement(node: ReturnStatement, context: GenerateCtx) {
+    const {push} = context
+    if (!node.return) {
+        push('return')
+    } else {
+        push('return ')
+        genNode(node.return, context)
+    }
+}
+
+function genCallExpression(node: CallExpressionNode, context: GenerateCtx) {
+    const {push} = context
+    const {callee, arguments: args} = node
+    push(`${callee.name}(`)
+    genNodeList(args, context)
+    push(')')
+}
+
+function genStringLiteral(node: StringLiteral, context: GenerateCtx) {
+    const {push} = context
+    push(`'${node.value}'`)
+}
+
