@@ -26,6 +26,13 @@ interface GenerateCtx {
     deIndent()
 }
 
+interface ParseCtx {
+    source: string,
+    mode: string
+}
+
+type Ancestor = any
+
 enum JSASTType {
     'FunctionDecl'='FunctionDecl',
     'CallExpression'='CallExpression',

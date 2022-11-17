@@ -109,6 +109,8 @@ function tokenize(str: string) {
  * @return template ast
  */
 function parse(str: string) {
+
+
     // 先进行tokenize
     const tokens = tokenize(str)
 

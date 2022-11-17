@@ -1,4 +1,4 @@
-import {tokenize, parse, dump, transform, generate} from "../parser";
+import {tokenize, parse, dump, transform, generate} from "../parser_old";
 
 describe('tokenize解析', ()=> {
     test('p标签解析', () => {
