@@ -1,9 +1,17 @@
 interface TemplateAstNode {
     type: string,
     children?: TemplateAstNode[],
+    props?: Prop[]
     tag?: string,
-    content?: string,
-    jsNode?: JSASTNode
+    content?: string | TemplateAstNode,
+    jsNode?: JSASTNode,
+    isSelfClosing?: boolean,
+}
+
+interface Prop {
+    type: string,
+    name: string,
+    value: string
 }
 
 type TransformFn = (ast: TemplateAstNode, context: TraverseCtx) => Fn | void
@@ -28,10 +36,12 @@ interface GenerateCtx {
 
 interface ParseCtx {
     source: string,
-    mode: string
+    mode: string,
+    advanceBy(num: number), // 消费指定数量的字符
+    advanceSpaces(),        // 匹配无效空白字符串
 }
 
-type Ancestor = any
+type Ancestor = TemplateAstNode
 
 enum JSASTType {
     'FunctionDecl'='FunctionDecl',

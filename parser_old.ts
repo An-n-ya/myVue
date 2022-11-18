@@ -278,7 +278,9 @@ function transformElement(node: TemplateAstNode, context: TraverseCtx) {
 function transformText(node: TemplateAstNode, context: TraverseCtx) {
     // 创建文本jsAST
     if (node.type === 'Text' && node.content) {
-        node.jsNode = createStringLiteral(node.content)
+        if (typeof node.content === 'string') {
+            node.jsNode = createStringLiteral(node.content)
+        }
     }
 }
 

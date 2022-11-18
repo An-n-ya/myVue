@@ -13,32 +13,38 @@ describe('基础parser', () => {
                 {
                     type: 'Element',
                     tag: 'div',
+                    props: [],
                     children: [
                         {
                             type: 'Element',
                             tag: 'p',
+                            props: [],
                             children: [
                                 {
                                     type: 'Text',
                                     content: 'Text1'
                                 }
-                            ]
+                            ],
+                            isSelfClosing: false
                         },
                         {
                             type: 'Element',
                             tag: 'p',
+                            props: [],
                             children: [
                                 {
                                     type: 'Text',
                                     content: 'Text2'
                                 }
-                            ]
+                            ],
+                            isSelfClosing: false
                         }
-                    ]
+                    ],
+                    isSelfClosing: false
                 }
             ]
         }
 
-        expect(JSON.stringify(res)).toBe(JSON.stringify(expects))
+        expect(JSON.stringify(res )).toBe(JSON.stringify(expects ))
     })
 })
