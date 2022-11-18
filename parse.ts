@@ -57,7 +57,7 @@ function parseChildren(context: ParseCtx, ancestors: Ancestor[]) {
     while (!isEnd(context, ancestors)) {
         advanceSpaces()
         mode = context.mode
-        source = context.source
+        source = context.source   // 注意！！！ 这里的source需要更新
 
         // if (ancestors.length != 0) {
         //     console.log(context)
